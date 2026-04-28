@@ -1,4 +1,20 @@
-﻿# PacMan Capture-The-Flag assignment
+﻿# PacMan Shooter (assignment 4)
+
+This assigment is an extension of the Capture-the-Flag (CTF) assignment, so the readme of that assignment is kept below for easy reference.
+
+The key changes compared to CTF are as follows 
+- All agents have a health 0-100, displayed in a health bar
+- All agents have a gun
+- Gun damage decreases linearly with distance
+- Gun cannot be aimed, but automatically fires at the closest enemy with a free line of sight. Thus a 1 vs 1 fight always ends in a draw. The rationale for this is to focus effort on multi-agent coordination, not clever aiming. Gunfire is shown as a red line between corresponding agents.
+- Health regenerates gradually when not shot during a few seconds
+- The rest of the game is the same. You still win by collecting food. You can still eat (melee) opponents in your own turf. Etc. 
+
+In the situation depicted below, both blue agents fire on the bottom red agent (closest), while both red agents fire on the right blue agent (closest). If all agents started from 100 health, the bottom red would die first, as damage is larger at short range. If the left blue agent approached the right red agent, he would draw fire, and the  blue would defeat the red in a 2-0 victory. If all agents remain stationary, the right blue agent would probably die before the remaining red, giving a 2-1 victory.
+
+![alt text](PacManShooter1.png)
+
+# PacMan Capture-The-Flag (assignment 3)
 
 Inspired by UC Berkeley's Python environment: https://inst.eecs.berkeley.edu/~cs188/fa24/projects/
 
