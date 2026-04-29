@@ -21,6 +21,7 @@ namespace PacMan.Agent
             // All of the calls below should also work in here. Report it as a bug if you find that some part of the observations is inaccessible during init.
         }
 
+        public Vector3 FormationPosition = Vector3.zero;
         public virtual PacManAction Tick() //The Tick from the network controller
         {
             _agent.GetTimeRemaining();
@@ -89,9 +90,10 @@ namespace PacMan.Agent
                 x = 1;
             }
 
+            Vector3 diffToFormPosition = FormationPosition - transform.position;
             var droneAction = new PacManAction
             {
-                Acceleration = new Vector2(x, z), // Controller converts to normalized if magnitude > 1. Magnitude 0.3 guarantees not observed
+                Acceleration = new Vector2(diffToFormPosition.x, diffToFormPosition.z), // Controller converts to normalized if magnitude > 1. Magnitude 0.3 guarantees not observed
             };
 
             return droneAction;
