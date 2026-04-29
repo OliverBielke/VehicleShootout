@@ -73,7 +73,7 @@ public class PhalanxShape : MonoBehaviour
             if (agentAI != null)
             {
                 Vector3 closestPosition = Positions[i] + rowAdjustment;
-                agentAI.FormationPosition = closestPosition;
+                //agentAI.FormationPosition = closestPosition;
             }
         }
     }
