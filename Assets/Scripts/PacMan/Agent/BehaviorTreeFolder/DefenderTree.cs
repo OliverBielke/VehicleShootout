@@ -12,7 +12,8 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool enemyLikelyCrossingMyLane;
         public bool safeMiddlePillsAvailable;
         public bool outsideDefensiveZone;
-
+        public bool hasTeamLeader;
+        
         public Vector3 powerCapsuleTargetPosition;
         public Vector3 homeTargetPosition;
         public Vector3 enemyPillTargetPosition;

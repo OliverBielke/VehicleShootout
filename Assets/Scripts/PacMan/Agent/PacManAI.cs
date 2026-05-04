@@ -202,6 +202,7 @@ namespace PacMan.Agent
         public override void Initialize(MapManager mapManager)
         {
             _agent = GetComponent<PacManAgentManager>();
+            TeamAssigner.Instance.RegisterAgent(_agent);
             _mapManager = mapManager;
             var gridSize = 0.2f;
             _obstacleMap = ObstacleMapV2.Initialize(_mapManager, new List<GameObject>(), new Vector3(gridSize, 1f, gridSize));
@@ -2373,6 +2374,8 @@ namespace PacMan.Agent
 
             switch (decision.DebugLabel)
             {
+                case "JoinTeamLead":
+                    return Vector2.zero;
                 // Defender
                 case "InterceptIntruder":
                     return ExecuteInterceptIntruder(decision);
