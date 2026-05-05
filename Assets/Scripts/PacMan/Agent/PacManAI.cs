@@ -121,6 +121,10 @@ namespace PacMan.Agent
         [SerializeField] private float teammateYieldObstacleInflation = 1f;
         [SerializeField] private float teammateYieldSettledTargetDistance = 0.45f;
         [SerializeField] private float teammateYieldReleaseDistance = 1.1f;
+        [Header("Team/Group Logic")]
+        [SerializeField] private float teamLeadDistance = 1.5f;
+        
+        
         private AgentMode _currentMode;
         private AgentMode _previousMode;
         private bool _visualizerLinked = false;
@@ -202,6 +206,7 @@ namespace PacMan.Agent
         public override void Initialize(MapManager mapManager)
         {
             _agent = GetComponent<PacManAgentManager>();
+            TeamAssigner.Instance.RegisterAgent(_agent);
             _mapManager = mapManager;
             var gridSize = 0.2f;
             _obstacleMap = ObstacleMapV2.Initialize(_mapManager, new List<GameObject>(), new Vector3(gridSize, 1f, gridSize));
@@ -246,68 +251,72 @@ namespace PacMan.Agent
         {
             _agent.GetTimeRemaining();
             _agent.GetScore();
+                
+            
+            Vector3 velocity = _agent.GetVelocity();
+            int carriedFoodCount = _agent.GetCarriedFoodCount();
 
-                Vector3 velocity = _agent.GetVelocity();
-                int carriedFoodCount = _agent.GetCarriedFoodCount();
-
-                int currentRespawnStep = _agent.GetLastRespawnStep();
-                if (_lastKnownRespawnStep != currentRespawnStep)
-                {
-                    ClearCurrentPath();
-                    _lastKnownRespawnStep = currentRespawnStep;
-                    _attackerThreatRetreatActive = false;
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    _attackerRegroupAfterReturnHome = false;
-                    _lastPlannedUnsafeCellCount = 0;
-                    _hasLatchedHomeTarget = false;
-                    _lastHomeTargetRefreshStep = -99999;
-                    _lastScaredCounterRaidTargetStep = -99999;
-                    _teammateYieldBackoffUntilStep = -1;
-                    _teammateYieldObstacleUntilStep = -1;
-                    _teammateYieldRetriggerBlockedUntilStep = -1;
-                    _teammateYieldWaitingForSeparation = false;
-                }
-
-                RegisterConsumedEnemyCapsuleFromTeamPositions();
-
-                TryTriggerTeammateYield();
-
-                if (IsTeammateYieldBackoffActive())
-                {
-                    ClearCurrentPath();
-                    _previousMode = _currentMode;
-                    _btReason = "Yielding to teammate";
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    return new PacManAction
-                    {
-                        Acceleration = _teammateYieldBackoffAcceleration
-                    };
-                }
-
-                bool justDepositedFood =
-                    _assignedRole == StaticRole.Attack &&
-                    _previousCarriedFoodCount > 0 &&
-                    carriedFoodCount == 0 &&
-                    IsInOwnTerritory(transform.localPosition);
-
-                if (justDepositedFood)
-                {
-                    _attackerRegroupAfterReturnHome = true;
-                    ClearCurrentPath();
-                }
-
-                _lastDecision = EvaluateCurrentRoleTree();
-                _currentMode = _lastDecision.Mode;
-
-                if (_currentMode != _previousMode)
-                {
-                    ClearCurrentPath();
-                }
-
-                Vector2 accel = ExecuteDecision(_lastDecision, velocity);
-
-                _previousMode = _currentMode;
+            int currentRespawnStep = _agent.GetLastRespawnStep();
+            if (_lastKnownRespawnStep != currentRespawnStep)
+            {
+                ClearCurrentPath();
+                _lastKnownRespawnStep = currentRespawnStep;
+                _attackerThreatRetreatActive = false;
                 _previousCarriedFoodCount = carriedFoodCount;
+                _attackerRegroupAfterReturnHome = false;
+                _lastPlannedUnsafeCellCount = 0;
+                _hasLatchedHomeTarget = false;
+                _lastHomeTargetRefreshStep = -99999;
+                _lastScaredCounterRaidTargetStep = -99999;
+                _teammateYieldBackoffUntilStep = -1;
+                _teammateYieldObstacleUntilStep = -1;
+                _teammateYieldRetriggerBlockedUntilStep = -1;
+                _teammateYieldWaitingForSeparation = false;
+                TeamAssigner.Instance.SwapTeamLeader(_agent);
+            }
+
+            RegisterConsumedEnemyCapsuleFromTeamPositions();
+
+            TryTriggerTeammateYield();
+
+            if (IsTeammateYieldBackoffActive())
+            {
+                ClearCurrentPath();
+                _previousMode = _currentMode;
+                _btReason = "Yielding to teammate";
+                _previousCarriedFoodCount = carriedFoodCount;
+                return new PacManAction
+                {
+                    Acceleration = _teammateYieldBackoffAcceleration
+                };
+            }
+
+            bool justDepositedFood =
+                _assignedRole == StaticRole.Attack &&
+                _previousCarriedFoodCount > 0 &&
+                carriedFoodCount == 0 &&
+                IsInOwnTerritory(transform.localPosition);
+
+            if (justDepositedFood)
+            {
+                _attackerRegroupAfterReturnHome = true;
+                ClearCurrentPath();
+            }
+            
+            
+            
+            _lastDecision = EvaluateCurrentRoleTree();
+            _currentMode = _lastDecision.Mode;
+
+            if (_currentMode != _previousMode)
+            {
+                ClearCurrentPath();
+            }
+
+            Vector2 accel = ExecuteDecision(_lastDecision, velocity);
+
+            _previousMode = _currentMode;
+            _previousCarriedFoodCount = carriedFoodCount;
 
             return new PacManAction
             {
@@ -756,6 +765,9 @@ namespace PacMan.Agent
                 out Vector3 protectedFoodCenter,
                 out List<Vector3> protectedFoodPositions);
 
+            bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
+            bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+            
             bb.homeTargetPosition = homeTarget;
 
             if (isScared)
@@ -919,6 +931,10 @@ namespace PacMan.Agent
                    timeRemaining <= _cachedCapsuleRushTimeThreshold &&
                  TryGetClosestObjectPosition(myPos, activeEnemyCapsules, out capsuleTarget) &&
                  CanReachCapsuleWithBufferTime(myPos, capsuleTarget, timeRemaining);
+             
+             bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
+             bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+
              
              // Don't return home due to time if we should rush the power capsule instead
              bool shouldReturnHomeLateGame;
@@ -2373,6 +2389,8 @@ namespace PacMan.Agent
 
             switch (decision.DebugLabel)
             {
+                case "MoveToLeader":
+                    return ExecuteMoveToTeamLeader(decision);
                 // Defender
                 case "InterceptIntruder":
                     return ExecuteInterceptIntruder(decision);
@@ -2754,7 +2772,33 @@ namespace PacMan.Agent
                 }
             }
         }
+
         
+        private Vector2 ExecuteMoveToTeamLeader(BTDecision decision)
+        {
+            if (decision == null || !decision.HasTarget)
+            {
+                ClearCurrentPath();
+                return Vector2.zero;
+            }
+            
+            Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
+            Vector3 interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, IsInOwnTerritory, radiusStep: 0.2f, maxRadiusSteps: 24);
+            if (_obstacleMap == null ||
+                _obstacleMap.GetLocalPointTraversibility(interceptTarget) != ObstacleMapV2.Traversability.Free)
+            {
+                Vector3 fallbackTarget = _hasDefenseAnchor ? _defenseAnchor : transform.localPosition;
+                interceptTarget = SnapToNearestFreePoint(fallbackTarget, IsInOwnTerritory, radiusStep: 0.2f, maxRadiusSteps: 24);
+            }
+
+            if (TryGetCloseIntruderPursuitAcceleration(interceptTarget, out var pursuitAcceleration))
+            {
+                ClearCurrentPath();
+                return pursuitAcceleration;
+            }
+            
+            return MoveToTarget(interceptTarget, arriveDistance: 0.25f, ownTerritoryOnly: false);
+        }
         
         private Vector2 ExecuteInterceptIntruder(BTDecision decision)
         {

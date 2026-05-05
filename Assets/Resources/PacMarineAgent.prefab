@@ -254,6 +254,7 @@ MonoBehaviour:
   teammateYieldObstacleInflation: 1
   teammateYieldSettledTargetDistance: 0.45
   teammateYieldReleaseDistance: 1.1
+  teamLeadDistance: 1.5
 --- !u!114 &6052309846596243798
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -13,7 +13,9 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool safeEnemyPillsAvailable;
         public bool safeMiddlePillsAvailable;
         public bool outsideAttackZone;
+        public bool hasTeamLeader;
 
+        public Vector3 teamLeaderPosition;
         public Vector3 powerCapsuleTargetPosition;
         public Vector3 powerCapsuleCampPosition;
         public Vector3 homeTargetPosition;
@@ -34,6 +36,25 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     "Attacker Selector",
                     new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
                     {
+                        new SequenceNode<AttackerBlackboard>(
+                            "Group Up With Team Sequence",
+                            new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
+                            {
+                                new ConditionNode<AttackerBlackboard>(
+                                    "Has Leader",
+                                    bb => bb.hasTeamLeader
+                                ),
+                                new ActionNode<AttackerBlackboard>(
+                                    "MoveToLeader",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Attack,
+                                        "MoveToLeader",
+                                        hasTarget: true,
+                                        targetPosition: bb.teamLeaderPosition
+                                    )
+                                )
+                            }
+                        ),
                         new SequenceNode<AttackerBlackboard>(
                             "Late Game Return Home Sequence",
                             new System.Collections.Generic.List<BTNode<AttackerBlackboard>>

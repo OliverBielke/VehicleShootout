@@ -12,7 +12,9 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool enemyLikelyCrossingMyLane;
         public bool safeMiddlePillsAvailable;
         public bool outsideDefensiveZone;
-
+        public bool hasTeamLeader;
+        
+        public Vector3 teamLeaderPosition;
         public Vector3 powerCapsuleTargetPosition;
         public Vector3 homeTargetPosition;
         public Vector3 enemyPillTargetPosition;
@@ -34,6 +36,26 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     "Defender Selector",
                     new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                     {
+                        new SequenceNode<DefenderBlackboard>(
+                            "Group Up With Team Sequence",
+                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
+                            {
+                                new ConditionNode<DefenderBlackboard>(
+                                    "Has Leader",
+                                    bb => bb.hasTeamLeader
+                                ),
+                                new ActionNode<DefenderBlackboard>(
+                                    "MoveToLeader",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Attack,
+                                        "MoveToLeader",
+                                        hasTarget: true,
+                                        targetPosition: bb.teamLeaderPosition
+                                    )
+                                )
+                            }
+                        ),
+                        
                         new SequenceNode<DefenderBlackboard>(
                             "Grab Power Capsule Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
