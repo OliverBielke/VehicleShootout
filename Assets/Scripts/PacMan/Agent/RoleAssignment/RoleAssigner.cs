@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using PacMan;
 using PacMan.Agent.Map;
+using PacMan.Local;
 using Scripts.Map;
 
 namespace PacMan.Agent.RoleAssignment
@@ -27,7 +28,9 @@ namespace PacMan.Agent.RoleAssignment
         [SerializeField] private float attackLaneSwitchInterval = 10f;
         [SerializeField] [Range(0f, 1f)] private float smallerLaneBias = 0.7f;
         [SerializeField] [Range(0f, 2f)] private float laneRandomJitter = 0.35f;
-
+        
+        
+        
         private readonly List<PacManAIDebugBT> _registeredAgents = new();
         private ObstacleMapV2 _obstacleMap;
         private MapMiddleAnalyzer _middleAnalyzer;
@@ -138,24 +141,38 @@ namespace PacMan.Agent.RoleAssignment
                 AssignRolesForTeam(teamAgents);
             }
         }
-
+        //List<PacManAIDebugBT> attackersBlue = new List<PacManAIDebugBT>(), defendersBlue = new List<PacManAIDebugBT>();
+        //List<PacManAIDebugBT> attackersRed = new List<PacManAIDebugBT>(), defendersRed = new List<PacManAIDebugBT>();
         private void AssignRolesForTeam(List<PacManAIDebugBT> team)
         {
             if (team == null || team.Count == 0)
                 return;
 
-            int attackerCount = GetAttackerCount(team.Count);
+            
 
             var sortedByMiddleDistance = team
                 .OrderBy(ai => Mathf.Abs(ai.transform.localPosition.x - _middleInfo.MidXLocal))
                 .ThenBy(ai => ai.transform.localPosition.z)
                 .ToList();
 
-            var attackers = sortedByMiddleDistance.Take(attackerCount).ToList();
-            var defenders = sortedByMiddleDistance.Skip(attackerCount).ToList();
+            bool isBlue = team[0].CompareTag("Blue");
+            var memberLeaderDict =
+                isBlue ? TeamAssigner.Instance.MembersByLeaderBlue : TeamAssigner.Instance.MembersByLeaderRed;
+            var teamLeaders = memberLeaderDict.Keys.ToList();
+           
+            if (teamLeaders.Count == 0)
+                Debug.LogWarning("RoleAssigner: teamLeaders count is zero");
+            
+            int attackerCount = GetAttackerCount(teamLeaders.Count);
+            var attackers = teamLeaders.Take(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
+            var defenders = teamLeaders.Skip(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
 
             foreach (var attacker in attackers)
             {
+                foreach (var bodyguard in memberLeaderDict[attacker.AgentManager])
+                {
+                    bodyguard.GetComponent<PacManAIDebugBT>().SetAssignedRole(StaticRole.Attack);
+                }
                 attacker.SetAssignedRole(StaticRole.Attack);
                 attacker.ClearDefenseAnchor();
                 attacker.ClearAttackAnchor();
@@ -166,6 +183,10 @@ namespace PacMan.Agent.RoleAssignment
 
             foreach (var defender in defenders)
             {
+                foreach (var bodyguard in memberLeaderDict[defender.AgentManager])
+                {
+                    bodyguard.GetComponent<PacManAIDebugBT>().SetAssignedRole(StaticRole.Defend);
+                }
                 defender.SetAssignedRole(StaticRole.Defend);
                 defender.ClearAttackAnchor();
 

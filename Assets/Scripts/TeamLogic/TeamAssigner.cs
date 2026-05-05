@@ -90,6 +90,13 @@ public class TeamAssigner : MonoBehaviour
                 leaders[agent] = newLeader;
             }
             members.Remove(newLeader); // The leader is counted as "member" of its own team
+
+            var newLeaderAI = newLeader.GetComponent<PacManAIDebugBT>();
+            var oldLeaderAI = deadLeader.GetComponent<PacManAIDebugBT>();
+            if (newLeaderAI != null && oldLeaderAI != null)
+            {
+                newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
+            }
         }
     }
     
