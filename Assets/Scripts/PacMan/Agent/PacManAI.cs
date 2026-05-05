@@ -45,6 +45,7 @@ namespace PacMan.Agent
         private BehaviorTree<AttackerBlackboard> _attackerTree;
         private BTDecision _lastDecision;
         private string _btReason = "-";
+        private StaticRole _staticAssignedRole = StaticRole.None;
         [SerializeField] private bool drawObstacleMap = false;
         [Header("Debug")]
         [SerializeField] private StaticRole _assignedRole = StaticRole.None;
@@ -165,9 +166,9 @@ namespace PacMan.Agent
 
         // Fine grid is 0.2 and Voronoi grid is 1.0, so each coarse cell spans 5x5 fine cells.
         private const int VoronoiCellScaleFactor = 5; // fine 0.2 grid to coarse 1.0 grid
-
         private const float AnchorReachedDistance = 0.35f;
-
+        
+        public StaticRole StaticAssignedRole => _staticAssignedRole;
         public StaticRole AssignedRole => _assignedRole;
         public bool HasAssignedRole => _assignedRole != StaticRole.None;
         public PacManAgentManager AgentManager => _agent;
@@ -178,9 +179,23 @@ namespace PacMan.Agent
 
         public void SetAssignedRole(StaticRole role)
         {
+            _staticAssignedRole = role;
             _assignedRole = role;
             Debug.Log($"{name} assigned role: {_assignedRole}");
         }
+
+        public void SetTemporaryRole(StaticRole role)
+        {
+            _assignedRole = role;
+            Debug.Log($"{name} assigned temporary role: {_assignedRole}");
+        }
+        
+        public void RevertTemporaryRole(StaticRole role)
+        {
+            _assignedRole = _staticAssignedRole;
+            Debug.Log($"{name} reverted to non-temporary role: {_assignedRole}");
+        }
+
 
         public void SetDefenseAnchor(Vector3 anchor)
         {
@@ -745,6 +760,170 @@ namespace PacMan.Agent
             return Mathf.Abs(stableId) % interval;
         }
         
+        private DefenderBlackboard BuildBodyGuardBlackboard()
+        {
+            DefenderBlackboard bb = new DefenderBlackboard();
+
+            Vector3 myPos = transform.localPosition;
+            UpdateVoronoiData();
+            var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
+            var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
+                                                TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
+            bool isPowered = _agent.IsPoweredUp();
+            bool isScared = _agent.IsScared();
+            float scaredRemaining = Mathf.Max(0f, _agent.GetScaredRemainingDuration());
+            int carriedFood = _agent.GetCarriedFoodCount();
+            Vector3 homeTarget = GetSafestHomePoint();
+            bool holdLaneDueToFoodPile = ShouldHoldDefenderLaneDueToFoodPile(
+                out int protectedLaneFoodCount,
+                out Vector3 protectedFoodCenter,
+                out List<Vector3> protectedFoodPositions);
+
+            bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
+            bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+            
+            bb.homeTargetPosition = homeTarget;
+
+            if (isScared)
+            {
+                if (carriedFood >= poweredReturnFoodThreshold || scaredRemaining < 2f)
+                {
+                    bb.shouldReturnHome = true;
+                    bb.debugReason = carriedFood >= poweredReturnFoodThreshold
+                        ? "Scared loot threshold reached"
+                        : "Scared ending soon, returning home";
+                }
+                else
+                {
+                    var scaredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
+                    GameObject selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, scaredAssignment?.FoodTarget));
+                    string selectedFoodReason = selectedFoodTarget != null
+                        ? "Scared counter-raid (safest pill)"
+                        : (scaredAssignment?.Reason ?? "Scared counter-raid");
+
+                    if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
+                    {
+                        GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
+                        if (alternateFoodTarget != null)
+                        {
+                            selectedFoodTarget = alternateFoodTarget;
+                            RegisterUnsafeFoodRetarget();
+                            selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
+                        }
+                    }
+
+                    if (selectedFoodTarget != null)
+                    {
+                        SetCurrentFoodTarget(selectedFoodTarget);
+                        _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
+                        bb.shouldLootWhilePowered = true;
+                        bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
+                        bb.debugReason = selectedFoodReason;
+                    }
+                    else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
+                    {
+                        bb.shouldLootWhilePowered = true;
+                        bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
+                        bb.debugReason = "Scared counter-raid (committed pill)";
+                    }
+                    else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
+                    {
+                        SetCurrentFoodTarget(null);
+                        bb.shouldLootWhilePowered = true;
+                        bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
+                        bb.debugReason = "Scared counter-raid fallback";
+                    }
+                    else
+                    {
+                        SetCurrentFoodTarget(null);
+                        _lastScaredCounterRaidTargetStep = -99999;
+                        bb.shouldReturnHome = true;
+                        bb.debugReason = "Scared with no enemy pill target";
+                    }
+                }
+            }
+            else if (isPowered && !holdLaneDueToFoodPile)
+            {
+                bb.shouldReturnHome = carriedFood >= poweredReturnFoodThreshold;
+
+                var poweredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
+                GameObject poweredFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, poweredAssignment?.FoodTarget));
+                if (!bb.shouldReturnHome && poweredFoodTarget != null)
+                {
+                    SetCurrentFoodTarget(poweredFoodTarget);
+                    bb.shouldLootWhilePowered = true;
+                    bb.enemyPillTargetPosition = poweredFoodTarget.transform.localPosition;
+                    bb.debugReason = "Powered up loot mode";
+                }
+                else if (bb.shouldReturnHome)
+                {
+                    SetCurrentFoodTarget(null);
+                    bb.debugReason = "Powered loot threshold reached";
+                }
+            }
+            else if (isPowered && holdLaneDueToFoodPile)
+            {
+                SetCurrentFoodTarget(null);
+                bb.debugReason = $"Powered guarding lane pill pile ({protectedLaneFoodCount} pills)";
+            }
+
+            bool defendAssignmentAllowed =
+                defendAssignment != null &&
+                (!holdLaneDueToFoodPile ||
+                 IsIntruderNearProtectedFoodPile(defendAssignment.TargetPosition, protectedFoodCenter, protectedFoodPositions));
+
+            if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && defendAssignmentAllowed)
+            {
+                bb.enemyPacmanIntruderSuspected = true;
+                bb.suspectedIntruderPosition = defendAssignment.TargetPosition;
+                bb.debugReason = defendAssignment.Reason;
+            }
+            else if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && holdLaneDueToFoodPile)
+            {
+                if (string.IsNullOrEmpty(bb.debugReason))
+                    bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
+            }
+
+            bb.enemyLikelyCrossingMyLane = false;
+            bb.predictedCrossingPoint = Vector3.zero;
+            if (!bb.shouldLootWhilePowered &&
+                !bb.shouldReturnHome &&
+                !isPowered &&
+                !isScared &&
+                !bb.enemyPacmanIntruderSuspected &&
+                TryGetMirrorLaneTarget(out var mirrorTarget, out var mirrorReason))
+            {
+                bb.enemyLikelyCrossingMyLane = true;
+                bb.predictedCrossingPoint = mirrorTarget;
+                bb.debugReason = mirrorReason;
+            }
+
+            bb.safeMiddlePillsAvailable = false;
+            bb.safeMiddlePillPosition = Vector3.zero;
+            if (!bb.shouldLootWhilePowered &&
+                !bb.shouldReturnHome &&
+                !bb.enemyPacmanIntruderSuspected &&
+                !bb.enemyLikelyCrossingMyLane &&
+                (!isPowered || !holdLaneDueToFoodPile) &&
+                TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
+            {
+                bb.safeMiddlePillsAvailable = true;
+                bb.safeMiddlePillPosition = safeMiddleTarget;
+                bb.debugReason = safeMiddleReason;
+            }
+
+            bb.formationPoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
+            bb.dropZonePoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
+
+            bb.outsideDefensiveZone =
+                _hasDefenseAnchor &&
+                Vector3.Distance(myPos, _defenseAnchor) > 1.25f;
+
+            if (string.IsNullOrEmpty(bb.debugReason))
+                bb.debugReason = "Default defend state";
+
+            return bb;
+        }
 
         private DefenderBlackboard BuildDefenderBlackboard()
         {
