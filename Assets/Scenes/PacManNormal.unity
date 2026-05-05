@@ -6017,10 +6017,10 @@ MonoBehaviour:
   middle: 0
   voronoi: 0
   aStar: 0
-  path: 1
-  vO: 1
-  enemyLocalization: 1
-  agentHud: 1
+  path: 0
+  vO: 0
+  enemyLocalization: 0
+  agentHud: 0
 --- !u!4 &123659046
 Transform:
   m_ObjectHideFlags: 0
@@ -15792,8 +15792,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 960ffb818f24f4cd6ab897467c6d9bd0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TeamAssigner
-  radiusPerFollower: 2
-  _visualizeGroups: 1
+  staticGroupSize: 3
+  TeamUpdatePeriod: 1000000
+  _visualizeGroups: 0
 --- !u!1 &316616842
 GameObject:
   m_ObjectHideFlags: 0
