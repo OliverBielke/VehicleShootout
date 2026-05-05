@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using PacMan;
 using PacMan.Agent;
+using PacMan.Game;
 using PacMan.Local;
 using UnityEngine;
 
@@ -39,16 +40,25 @@ public class TeamAssigner : MonoBehaviour
 
     [SerializeField] private int staticGroupSize = 2;
     [SerializeField] private int TeamUpdatePeriod = 300;
+    private bool hasBuiltTeams = false;
     private int currentUpdateFrame = 0;
     private void FixedUpdate()
     {
-        if (currentUpdateFrame % TeamUpdatePeriod == 0)
+        
+        if (!hasBuiltTeams || currentUpdateFrame % TeamUpdatePeriod == 0)
         {
             Debug.Log("Updated Team/Group assignments!");
             if (RedAgents.Count > 0)
+            {
                 CreateGroupsStaticDuos(false);
+                hasBuiltTeams = true;
+            }
+
             if (BlueAgents.Count > 0)
+            {
                 CreateGroupsStaticDuos(true);
+                hasBuiltTeams = true;
+            }
         }
         
         currentUpdateFrame++;
