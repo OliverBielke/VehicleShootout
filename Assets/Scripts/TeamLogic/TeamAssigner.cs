@@ -24,17 +24,15 @@ public class TeamAssigner : MonoBehaviour
         new Dictionary<PacManAgentManager, PacManAgentManager>();
     
     public static TeamAssigner Instance = null;
-
+    
     private void Awake()
     {
         if (Instance != null && Instance != this)
         {
             Destroy(this.gameObject);
+            return;
         }
-        else
-        {
-            Instance = this;
-        }
+        Instance = this;
     }
 
     [SerializeField] private int staticGroupSize = 2;
@@ -87,6 +85,12 @@ public class TeamAssigner : MonoBehaviour
             {
                 newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
             }
+            
+            // Update FormationManager with the new leader
+            if (FormationManager.Instance != null)
+            {
+                FormationManager.Instance.SwapLeader(deadLeader, newLeader);
+            }
         }
     }
     
@@ -118,6 +122,17 @@ public class TeamAssigner : MonoBehaviour
 
     private void ClearAssignments(bool isBlue)
     {
+        var membersByLeader = isBlue ? MembersByLeaderBlue : MembersByLeaderRed;
+        
+        // Deregister groups from FormationManager
+        if (FormationManager.Instance != null)
+        {
+            foreach (var leader in membersByLeader.Keys)
+            {
+                FormationManager.Instance.DeRegisterGroup(leader);
+            }
+        }
+        
         if (isBlue)
         {
             MembersByLeaderBlue.Clear();
@@ -192,6 +207,22 @@ public class TeamAssigner : MonoBehaviour
                 Debug.LogWarning("Trying to assign member to non-registered leader!");
             }
         }
+        
+        // Register groups with FormationManager
+        if (FormationManager.Instance != null)
+        {
+            foreach (var kvp in membersByLeader)
+            {
+                PacManAgentManager leader = kvp.Key;
+                List<PacManAgentManager> members = kvp.Value;
+                
+                // Include the leader in the members list for FormationManager
+                var allMembers = new List<PacManAgentManager>(members);
+                allMembers.Add(leader);
+                
+                FormationManager.Instance.RegisterGroup(leader, allMembers, IShape.Phalanx);
+            }
+        }
     }
     
     
@@ -252,6 +283,22 @@ public class TeamAssigner : MonoBehaviour
             else
             {
                 Debug.LogWarning("Trying to assign member to non-registered leader!");
+            }
+        }
+        
+        // Register groups with FormationManager
+        if (FormationManager.Instance != null)
+        {
+            foreach (var kvp in membersByLeader)
+            {
+                PacManAgentManager leader = kvp.Key;
+                List<PacManAgentManager> members = kvp.Value;
+                
+                // Include the leader in the members list for FormationManager
+                var allMembers = new List<PacManAgentManager>(members);
+                allMembers.Add(leader);
+                
+                FormationManager.Instance.RegisterGroup(leader, allMembers, IShape.Phalanx);
             }
         }
     }
