@@ -147,9 +147,7 @@ namespace PacMan.Agent.RoleAssignment
         {
             if (team == null || team.Count == 0)
                 return;
-
             
-
             var sortedByMiddleDistance = team
                 .OrderBy(ai => Mathf.Abs(ai.transform.localPosition.x - _middleInfo.MidXLocal))
                 .ThenBy(ai => ai.transform.localPosition.z)
@@ -164,14 +162,21 @@ namespace PacMan.Agent.RoleAssignment
                 Debug.LogWarning("RoleAssigner: teamLeaders count is zero");
             
             int attackerCount = GetAttackerCount(teamLeaders.Count);
-            var attackers = teamLeaders.Take(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
-            var defenders = teamLeaders.Skip(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
-
+            var attackers = teamLeaders.OrderBy(l => memberLeaderDict[l].Count).Take(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
+            var defenders = teamLeaders.OrderBy(l => memberLeaderDict[l].Count).Skip(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
+            
+            List<PacManAIDebugBT> allAttackers = new List<PacManAIDebugBT>(attackers);
+            List<PacManAIDebugBT> allDefenders = new List<PacManAIDebugBT>(defenders);
+            
             foreach (var attacker in attackers)
             {
                 foreach (var bodyguard in memberLeaderDict[attacker.AgentManager])
                 {
-                    bodyguard.GetComponent<PacManAIDebugBT>().SetAssignedRole(StaticRole.Attack);
+                    var bodyGuardAI = bodyguard.GetComponent<PacManAIDebugBT>();
+                    allAttackers.Add(bodyGuardAI);
+                    bodyGuardAI.SetAssignedRole(StaticRole.Attack);
+                    bodyGuardAI.ClearDefenseAnchor();
+                    bodyGuardAI.ClearAttackAnchor();
                 }
                 attacker.SetAssignedRole(StaticRole.Attack);
                 attacker.ClearDefenseAnchor();
@@ -185,7 +190,10 @@ namespace PacMan.Agent.RoleAssignment
             {
                 foreach (var bodyguard in memberLeaderDict[defender.AgentManager])
                 {
-                    bodyguard.GetComponent<PacManAIDebugBT>().SetAssignedRole(StaticRole.Defend);
+                    var bodyGuardAI = bodyguard.GetComponent<PacManAIDebugBT>();
+                    allDefenders.Add(bodyGuardAI);
+                    bodyGuardAI.SetAssignedRole(StaticRole.Defend);
+                    bodyGuardAI.ClearAttackAnchor();
                 }
                 defender.SetAssignedRole(StaticRole.Defend);
                 defender.ClearAttackAnchor();
@@ -194,8 +202,8 @@ namespace PacMan.Agent.RoleAssignment
                     Debug.Log($"RoleAssigner: {defender.name} -> DEFEND");
             }
 
-            AssignAttackAnchors(attackers);
-            AssignDefenseAnchors(defenders);
+            AssignAttackAnchors(allAttackers);
+            AssignDefenseAnchors(allDefenders);
         }
 
         public List<PacManAIDebugBT> GetRegisteredAgentsForTeam(Team team)

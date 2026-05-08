@@ -220,8 +220,13 @@ namespace PacMan.Agent
         {
             _hasAttackAnchor = false;
         }
+
+        private Rigidbody _rigidbody;
+        private float maxSpeed = 20f;
         public override void Initialize(MapManager mapManager)
         {
+            Debug.Log("Initializing PacMan AI");
+            _rigidbody = GetComponent<Rigidbody>();
             _agent = GetComponent<PacManAgentManager>();
             TeamAssigner.Instance.RegisterAgent(_agent);
             _mapManager = mapManager;
@@ -257,13 +262,14 @@ namespace PacMan.Agent
             
             var coarseObstacleMap = ObstacleMapV2.Initialize(_mapManager, new List<GameObject>(), new Vector3(1f, 1f, 1f));
             _voronoiPartitioning = new VoronoiPartitioning(coarseObstacleMap);
+            maxSpeed = GetComponent<PacManMovementController>().max_speed;
         }
 
         private void OnDisable()
         {
             RoleAssigner.Instance?.UnregisterAgent(this);
         }
-
+        
         public override PacManAction Tick()
         {
             _agent.GetTimeRemaining();
@@ -334,7 +340,16 @@ namespace PacMan.Agent
 
             _previousMode = _currentMode;
             _previousCarriedFoodCount = carriedFoodCount;
-
+            
+            var teamManager = TeamAssigner.Instance;
+            bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||  teamManager.MembersByLeaderRed.ContainsKey(_agent);
+            Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
+            
+            if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
+            {
+                accel *= 0f;
+            }
+            
             return new PacManAction
             {
                 Acceleration = accel
@@ -488,8 +503,6 @@ namespace PacMan.Agent
 
         private Vector2 GetEvadeAcceleration(Vector3 velocity)
         {
-            
-            
             var visibleEnemies = _agent.GetVisibleEnemyAgents();
             if (visibleEnemies != null && visibleEnemies.Count > 0)
             {
@@ -2969,12 +2982,12 @@ namespace PacMan.Agent
             if (FormationAnchor == Vector3.zero)
             {
                 Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
-                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.3f, maxRadiusSteps: 24);
                 Debug.Log("Trying to move to team, but no formation-anchor is assigned.");
             }
             else
             {
-                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.3f, maxRadiusSteps: 24);
             }
             
             if (_obstacleMap == null ||
@@ -2990,7 +3003,7 @@ namespace PacMan.Agent
                 return pursuitAcceleration;
             }
             
-            return MoveToTarget(interceptTarget, arriveDistance: 0.25f, ownTerritoryOnly: false);
+            return MoveToTarget(interceptTarget, arriveDistance: 0.05f, ownTerritoryOnly: false);
         }
         
         private Vector2 ExecuteInterceptIntruder(BTDecision decision)
