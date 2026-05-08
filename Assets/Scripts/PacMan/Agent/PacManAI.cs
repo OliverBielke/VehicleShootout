@@ -132,6 +132,7 @@ namespace PacMan.Agent
         
         private VoronoiPartitioning _voronoiPartitioning;
         private Dictionary<Vector2Int, VoronoiCellData> _currentVoronoi;
+        
         private static readonly Dictionary<Team, List<Vector3>> ConsumedEnemyCapsulesByTeam = new();
         private static readonly Dictionary<int, FoodSpawnInfo> FoodSpawnInfoById = new();
 
