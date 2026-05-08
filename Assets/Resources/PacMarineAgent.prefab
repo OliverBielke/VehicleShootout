@@ -246,12 +246,12 @@ MonoBehaviour:
   pillDangerSwitchThreshold: 0.15
   pillDistanceSwitchThreshold: 1
   capsuleRepathIntervalSteps: 35
-  teammateYieldDetectDistance: 0.75
+  teammateYieldDetectDistance: 1
   teammateYieldBackoffSteps: 8
-  teammateYieldObstacleSteps: 20
+  teammateYieldObstacleSteps: 40
   teammateYieldRetriggerCooldownSteps: 12
   teammateYieldGoalIgnoreRadius: 0.5
-  teammateYieldObstacleInflation: 1
+  teammateYieldObstacleInflation: 1.5
   teammateYieldSettledTargetDistance: 0.45
   teammateYieldReleaseDistance: 1.1
   teamLeadDistance: 1.5

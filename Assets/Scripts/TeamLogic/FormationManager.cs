@@ -11,7 +11,7 @@ public class FormationInformation
 {
     public Vector3 Center =  Vector3.zero;
     public Vector3 Direction = Vector3.zero;
-    public float StepSize = 1f;
+    public float StepSize = .5f;
     public float MedianHP = 100f;
     public List<PacManAgentManager> Agents = new List<PacManAgentManager>();
     public List<Vector3> Positions = new List<Vector3>();
@@ -101,7 +101,12 @@ public class FormationManager : MonoBehaviour
             FormationInformation formation = pair.Value;
             PacManAgentManager leader = pair.Key;
             formation.Center = leader.transform.position;
-            formation.Direction = new Vector3(leader.transform.forward.x, 0f, leader.transform.forward.z);
+            
+            Vector3 closestEnemyDirection = formation.leaderAI.AgentManager.GetVisibleEnemyAgents().Select(e => e.transform.position - formation.Center)
+                .OrderBy(dir => dir.magnitude)
+                .FirstOrDefault();
+            
+            formation.Direction = closestEnemyDirection;
             
             if (formation.Agents == null || formation.Agents.Count == 0)
             {
@@ -135,8 +140,8 @@ public class FormationManager : MonoBehaviour
 
     private IShape getBestShape(FormationInformation formation)
     {
-        float minSpace = 1f;
-        if (Physics.SphereCast(formation.Center + Vector3.up*2f, minSpace, Vector3.down, out RaycastHit hit, 2f, 
+        float minSpace = .75f;
+        if (Physics.SphereCast(formation.Center + Vector3.up*3f, minSpace, Vector3.down, out RaycastHit hit, 2f, 
                 layerMask: LayerMask.GetMask("Obstacle")))
         {
             Debug.DrawLine(formation.Center, hit.point, Color.red, 1f);
@@ -181,8 +186,9 @@ public class FormationManager : MonoBehaviour
         
         for (int i = 0; i < formation.Agents.Count ; i++)
         {
-            rowAdjustment = (formation.Agents[i].GetHealth()<MedianHP? -1f:1f)*formation.StepSize/2 * formation.Direction.normalized;
-            positionAssignments[formation.Agents[i]] = formation.Positions[i] + rowAdjustment;
+            rowAdjustment = (formation.Agents[i].GetHealth()<MedianHP? -1f:1f)*formation.StepSize/1.75f * formation.Direction.normalized;
+            formation.Positions[i] += rowAdjustment;
+            positionAssignments[formation.Agents[i]] = formation.Positions[i];
         }
         return positionAssignments;
     }

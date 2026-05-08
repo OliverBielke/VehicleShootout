@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using PacMan;
 using PacMan.Agent;
-using PacMan.Game;
 using PacMan.Local;
 using UnityEngine;
 
@@ -38,24 +37,23 @@ public class TeamAssigner : MonoBehaviour
 
     [SerializeField] private int staticGroupSize = 2;
     [SerializeField] private int TeamUpdatePeriod = 300;
-    private bool hasBuiltTeams = false;
+    private bool hasCreatedTeams = false;
     private int currentUpdateFrame = 0;
     private void FixedUpdate()
     {
-        
-        if (!hasBuiltTeams || currentUpdateFrame % TeamUpdatePeriod == 0)
+        if (!hasCreatedTeams || currentUpdateFrame % TeamUpdatePeriod == 0)
         {
             Debug.Log("Updated Team/Group assignments!");
             if (RedAgents.Count > 0)
             {
-                CreateGroupsStaticDuos(false);
-                hasBuiltTeams = true;
+                hasCreatedTeams = true;
+                CreateGroupsStatic(false);
             }
 
             if (BlueAgents.Count > 0)
             {
-                CreateGroupsStaticDuos(true);
-                hasBuiltTeams = true;
+                hasCreatedTeams = true;
+                CreateGroupsStatic(true);
             }
         }
         
@@ -68,6 +66,7 @@ public class TeamAssigner : MonoBehaviour
             BlueAgents.Add(agent);
         else
             RedAgents.Add(agent);
+        Debug.Log("Registered Agent!");
     }
 
     public void SwapTeamLeader(PacManAgentManager deadLeader)
@@ -91,10 +90,6 @@ public class TeamAssigner : MonoBehaviour
 
             var newLeaderAI = newLeader.GetComponent<PacManAIDebugBT>();
             var oldLeaderAI = deadLeader.GetComponent<PacManAIDebugBT>();
-            if (newLeaderAI != null && oldLeaderAI != null)
-            {
-                newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
-            }
             
             // Update FormationManager with the new leader
             if (FormationManager.Instance != null)
@@ -124,7 +119,7 @@ public class TeamAssigner : MonoBehaviour
         else
         {
             leader = null;
-            Debug.LogWarning("Could not find leader for agent!");
+            //Debug.LogWarning("Could not find leader for agent!");
             return false;
         }
     }
@@ -154,16 +149,18 @@ public class TeamAssigner : MonoBehaviour
             LeaderByMemberRed.Clear();
         }
     }
-    
+
+    [SerializeField] private int attackerCount = 2;
     /// <summary>
     /// Use this either when first craeting groups, or reseting the match. Use GetGroupLeader Otherwise!
     /// </summary>
     /// <param name="isBlueTeam"></param>
     /// <returns></returns>
-    private void CreateGroupsStaticDuos(bool isBlueTeam)
+    private void CreateGroupsStatic(bool isBlueTeam)
     {
         ClearAssignments(isBlueTeam);
         List<PacManAgentManager> agents = isBlueTeam ? BlueAgents : RedAgents;
+        Debug.Log("Creating teams for " + agents.Count + " agents");
         Dictionary<PacManAgentManager, List<PacManAgentManager>> membersByLeader =
             isBlueTeam ? MembersByLeaderBlue : MembersByLeaderRed;
         Dictionary<PacManAgentManager, PacManAgentManager> leaderByMember =
@@ -173,13 +170,13 @@ public class TeamAssigner : MonoBehaviour
         int totalCapacity = 0;
         //List<PacManAgentManager> newLeaders = new List<PacManAgentManager>();
         int firstMemberIndex = -1;
-
+        
         for (int i = 0; i < agents.Count; i++)
         {
             if (totalCapacity >= agents.Count - i)
                 break;
-
-            totalCapacity += staticGroupSize-1;
+            if (i >= attackerCount)
+                totalCapacity += staticGroupSize-1;
             //newLeaders.Add(agents[i]);
             membersByLeader[agents[i]] = new List<PacManAgentManager>();
             firstMemberIndex = i + 1;
@@ -188,14 +185,26 @@ public class TeamAssigner : MonoBehaviour
         for (int i = firstMemberIndex; i < agents.Count; i++)
         {
             PacManAgentManager member = agents[i];
+            if (member == null || member.transform == null)
+            {
+                Debug.LogWarning("Agent or transform is null, skipping assignment!");
+                continue;
+            }
+            
             PacManAgentManager closestLeader = null;
             float closestDistance = float.MaxValue;
             for (int j = 0; j < firstMemberIndex; j++)
             {
                 PacManAgentManager leader = agents[j];
+                if (leader == null || leader.transform == null)
+                {
+                    Debug.LogWarning("Leader or transform is null, skipping!");
+                    continue;
+                }
+                
                 float newDist = Vector3.Distance(member.transform.position, leader.transform.position);
 
-                if (newDist < closestDistance && (membersByLeader[leader].Count+.01f) < staticGroupSize-1)
+                if (j >= attackerCount && newDist < closestDistance && (membersByLeader[leader].Count+.01f) < staticGroupSize-1)
                 {
                     closestDistance = newDist;
                     closestLeader = leader;
@@ -204,8 +213,10 @@ public class TeamAssigner : MonoBehaviour
 
             if (closestLeader == null)
             {
-                Debug.LogWarning("Could not find leader for agent!");
+                Debug.LogWarning("Could not find leader for agent: " + member.name);
+                continue;
             }
+            
             if (membersByLeader.TryGetValue(closestLeader, out var members))
             {
                 membersByLeader.Remove(member);
@@ -270,11 +281,23 @@ public class TeamAssigner : MonoBehaviour
         for (int i = firstMemberIndex; i < agents.Count; i++)
         {
             PacManAgentManager member = agents[i];
+            if (member == null || member.transform == null)
+            {
+                Debug.LogWarning("Agent or transform is null, skipping assignment!");
+                continue;
+            }
+            
             PacManAgentManager closestLeader = null;
             float closestDistance = float.MaxValue;
             for (int j = 0; j < firstMemberIndex; j++)
             {
                 PacManAgentManager leader = agents[j];
+                if (leader == null || leader.transform == null)
+                {
+                    Debug.LogWarning("Leader or transform is null, skipping!");
+                    continue;
+                }
+                
                 float newDist = Vector3.Distance(member.transform.position, leader.transform.position);
 
                 if (newDist < closestDistance && (membersByLeader[leader].Count+.01f) < getLeaderCapacity(leader))
@@ -284,6 +307,12 @@ public class TeamAssigner : MonoBehaviour
                 }
             }
 
+            if (closestLeader == null)
+            {
+                Debug.LogWarning("Could not find leader for agent: " + member.name);
+                continue;
+            }
+            
             if (membersByLeader.TryGetValue(closestLeader, out var members))
             {
                 membersByLeader.Remove(member);
@@ -320,6 +349,12 @@ public class TeamAssigner : MonoBehaviour
     /// <returns></returns>
     private int getLeaderCapacity(PacManAgentManager agent)
     {
+        if (agent == null || agent.transform == null)
+        {
+            Debug.LogWarning("Agent or transform is null in getLeaderCapacity!");
+            return 0;
+        }
+        
         int closeFriendlies = 0;
         RaycastHit[] hits = Physics.SphereCastAll(agent.transform.position + Vector3.up * 12f, 12f, Vector3.down, 12f,
             layerMask: LayerMask.GetMask("Agent"));

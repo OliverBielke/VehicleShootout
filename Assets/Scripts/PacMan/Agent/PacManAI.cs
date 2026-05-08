@@ -220,8 +220,13 @@ namespace PacMan.Agent
         {
             _hasAttackAnchor = false;
         }
+
+        private Rigidbody _rigidbody;
+        private float maxSpeed = 20f;
         public override void Initialize(MapManager mapManager)
         {
+            Debug.Log("Initializing PacMan AI");
+            _rigidbody = GetComponent<Rigidbody>();
             _agent = GetComponent<PacManAgentManager>();
             TeamAssigner.Instance.RegisterAgent(_agent);
             _mapManager = mapManager;
@@ -257,94 +262,98 @@ namespace PacMan.Agent
             
             var coarseObstacleMap = ObstacleMapV2.Initialize(_mapManager, new List<GameObject>(), new Vector3(1f, 1f, 1f));
             _voronoiPartitioning = new VoronoiPartitioning(coarseObstacleMap);
+            maxSpeed = GetComponent<PacManMovementController>().max_speed;
         }
 
         private void OnDisable()
         {
             RoleAssigner.Instance?.UnregisterAgent(this);
         }
-
+        
         public override PacManAction Tick()
         {
-            using (DebugManager.BeginTimingScope("Total AI Tick"))
+            _agent.GetTimeRemaining();
+            _agent.GetScore();
+                
+            
+            Vector3 velocity = _agent.GetVelocity();
+            int carriedFoodCount = _agent.GetCarriedFoodCount();
+
+            int currentRespawnStep = _agent.GetLastRespawnStep();
+            if (_lastKnownRespawnStep != currentRespawnStep)
             {
-                _agent.GetTimeRemaining();
-                _agent.GetScore();
-                
-                
-                Vector3 velocity = _agent.GetVelocity();
-                int carriedFoodCount = _agent.GetCarriedFoodCount();
-
-                int currentRespawnStep = _agent.GetLastRespawnStep();
-                if (_lastKnownRespawnStep != currentRespawnStep)
-                {
-                    ClearCurrentPath();
-                    _lastKnownRespawnStep = currentRespawnStep;
-                    _attackerThreatRetreatActive = false;
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    _attackerRegroupAfterReturnHome = false;
-                    _lastPlannedUnsafeCellCount = 0;
-                    _hasLatchedHomeTarget = false;
-                    _lastHomeTargetRefreshStep = -99999;
-                    _lastScaredCounterRaidTargetStep = -99999;
-                    _teammateYieldBackoffUntilStep = -1;
-                    _teammateYieldObstacleUntilStep = -1;
-                    _teammateYieldRetriggerBlockedUntilStep = -1;
-                    _teammateYieldWaitingForSeparation = false;
-                    TeamAssigner.Instance.SwapTeamLeader(_agent);
-                }
-
-                RegisterConsumedEnemyCapsuleFromTeamPositions();
-
-                TryTriggerTeammateYield();
-
-                if (IsTeammateYieldBackoffActive())
-                {
-                    ClearCurrentPath();
-                    _previousMode = _currentMode;
-                    _btReason = "Yielding to teammate";
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    return new PacManAction
-                    {
-                        Acceleration = _teammateYieldBackoffAcceleration
-                    };
-                }
-
-                bool justDepositedFood =
-                    _assignedRole == StaticRole.Attack &&
-                    _previousCarriedFoodCount > 0 &&
-                    carriedFoodCount == 0 &&
-                    IsInOwnTerritory(transform.localPosition);
-
-                if (justDepositedFood)
-                {
-                    _attackerRegroupAfterReturnHome = true;
-                    ClearCurrentPath();
-                }
-                
-                
-                
-                using (DebugManager.BeginTimingScope("Behavior Tree"))
-                {
-                    _lastDecision = EvaluateCurrentRoleTree();
-                }
-                _currentMode = _lastDecision.Mode;
-
-                if (_currentMode != _previousMode)
-                {
-                    ClearCurrentPath();
-                }
-
-                Vector2 accel = ExecuteDecision(_lastDecision, velocity);
-
-                _previousMode = _currentMode;
+                ClearCurrentPath();
+                _lastKnownRespawnStep = currentRespawnStep;
+                _attackerThreatRetreatActive = false;
                 _previousCarriedFoodCount = carriedFoodCount;
+                _attackerRegroupAfterReturnHome = false;
+                _lastPlannedUnsafeCellCount = 0;
+                _hasLatchedHomeTarget = false;
+                _lastHomeTargetRefreshStep = -99999;
+                _lastScaredCounterRaidTargetStep = -99999;
+                _teammateYieldBackoffUntilStep = -1;
+                _teammateYieldObstacleUntilStep = -1;
+                _teammateYieldRetriggerBlockedUntilStep = -1;
+                _teammateYieldWaitingForSeparation = false;
+                TeamAssigner.Instance.SwapTeamLeader(_agent);
+            }
 
+            RegisterConsumedEnemyCapsuleFromTeamPositions();
+
+            TryTriggerTeammateYield();
+
+            if (IsTeammateYieldBackoffActive())
+            {
+                ClearCurrentPath();
+                _previousMode = _currentMode;
+                _btReason = "Yielding to teammate";
+                _previousCarriedFoodCount = carriedFoodCount;
                 return new PacManAction
                 {
-                    Acceleration = accel
+                    Acceleration = _teammateYieldBackoffAcceleration
                 };
             }
+
+            bool justDepositedFood =
+                _assignedRole == StaticRole.Attack &&
+                _previousCarriedFoodCount > 0 &&
+                carriedFoodCount == 0 &&
+                IsInOwnTerritory(transform.localPosition);
+
+            if (justDepositedFood)
+            {
+                _attackerRegroupAfterReturnHome = true;
+                ClearCurrentPath();
+            }
+            
+            
+            
+            _lastDecision = EvaluateCurrentRoleTree();
+            _currentMode = _lastDecision.Mode;
+
+            if (_currentMode != _previousMode)
+            {
+                ClearCurrentPath();
+            }
+
+            Vector2 accel = ExecuteDecision(_lastDecision, velocity);
+
+            _previousMode = _currentMode;
+            _previousCarriedFoodCount = carriedFoodCount;
+            
+            var teamManager = TeamAssigner.Instance;
+            bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||  teamManager.MembersByLeaderRed.ContainsKey(_agent);
+            Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
+            
+            if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
+            {
+                accel *= 0f;
+            }
+            
+            return new PacManAction
+            {
+                Acceleration = accel
+            };
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
@@ -494,8 +503,6 @@ namespace PacMan.Agent
 
         private Vector2 GetEvadeAcceleration(Vector3 velocity)
         {
-            
-            
             var visibleEnemies = _agent.GetVisibleEnemyAgents();
             if (visibleEnemies != null && visibleEnemies.Count > 0)
             {
@@ -621,25 +628,23 @@ namespace PacMan.Agent
         /// </summary>
         private bool MakePath(bool ownTerritoryOnly = false)
         {
-            using (DebugManager.BeginTimingScope("MakePath"))
+            _initialDroneState = _agent.transform;
+            var movementController = _initialDroneState.GetComponent<PacManMovementController>();
+            if (movementController == null)
             {
-                _initialDroneState = _agent.transform;
-                var movementController = _initialDroneState.GetComponent<PacManMovementController>();
-                if (movementController == null)
-                {
-                    Debug.LogWarning($"MakePath failed: missing {nameof(PacManMovementController)} on agent {name}.");
-                    _waypoints = null;
-                    _droneControlling = null;
-                    return false;
-                }
-                var curPos = _initialDroneState.localPosition;
-                var dynamicPathObstacles = BuildDynamicPathObstacles(
-                    _goalPosition,
-                    out int originalCapsuleObstacleCount,
-                    out int teammateYieldObstacleCount);
+                Debug.LogWarning($"MakePath failed: missing {nameof(PacManMovementController)} on agent {name}.");
+                _waypoints = null;
+                _droneControlling = null;
+                return false;
+            }
+            var curPos = _initialDroneState.localPosition;
+            var dynamicPathObstacles = BuildDynamicPathObstacles(
+                _goalPosition,
+                out int originalCapsuleObstacleCount,
+                out int teammateYieldObstacleCount);
 
-                var startTrav = _obstacleMap.GetLocalPointTraversibility(curPos);
-                var goalTrav = _obstacleMap.GetLocalPointTraversibility(_goalPosition);
+            var startTrav = _obstacleMap.GetLocalPointTraversibility(curPos);
+            var goalTrav = _obstacleMap.GetLocalPointTraversibility(_goalPosition);
 
             // Debug.Log(
             //     $"MakePath() | agent={name} | mode={_currentMode} | " +
@@ -648,60 +653,55 @@ namespace PacMan.Agent
             //     $"hasDefenseAnchor={_hasDefenseAnchor} | defenseAnchor={_defenseAnchor}"
             // );
 
-                UpdateVoronoiData();
-                bool enforceOwnTerritoryPath =
-                    ownTerritoryOnly &&
-                    IsInOwnTerritory(curPos) &&
-                    IsInOwnTerritory(_goalPosition);
+            UpdateVoronoiData();
+            bool enforceOwnTerritoryPath =
+                ownTerritoryOnly &&
+                IsInOwnTerritory(curPos) &&
+                IsInOwnTerritory(_goalPosition);
 
-                Astar aStar = new Astar(
-                    _obstacleMap,
-                    dynamicPathObstacles,
-                    enforceOwnTerritoryPath ? IsInOwnTerritory : null,
-                    VoronoiCellScaleFactor,
-                    voronoiPathDangerPenaltyMultiplier);
-                List<Vector3> aStarPath;
-                using (DebugManager.BeginTimingScope("A* Path"))
-                {
-                    aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
-                }
+            Astar aStar = new Astar(
+                _obstacleMap,
+                dynamicPathObstacles,
+                enforceOwnTerritoryPath ? IsInOwnTerritory : null,
+                VoronoiCellScaleFactor,
+                voronoiPathDangerPenaltyMultiplier);
+            List<Vector3> aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
 
-                _lastPlannedGoalPosition = _goalPosition;
-                _lastPlannedUnsafeCellCount = CountUnsafeCellsOnPath(aStarPath);
+            _lastPlannedGoalPosition = _goalPosition;
+            _lastPlannedUnsafeCellCount = CountUnsafeCellsOnPath(aStarPath);
 
-                if (aStarPath == null || aStarPath.Count < 2)
-                {
-                    Debug.LogWarning(
-                        $"MakePath failed: no valid A* path. " +
-                        $"agent={name} role={_assignedRole} mode={_currentMode} decision={_lastDecision?.DebugLabel ?? "-"} reason={_btReason} " +
-                        $"ownTerritoryOnly={ownTerritoryOnly} enforcedOwnTerritory={enforceOwnTerritoryPath} " +
-                        $"start={curPos} goal={_goalPosition} startTrav={startTrav} goalTrav={goalTrav} " +
-                        $"dynamicObstacles={dynamicPathObstacles.Count} capsuleObstacles={originalCapsuleObstacleCount} " +
-                        $"yieldObstacles={teammateYieldObstacleCount} activeCapsules={GetActiveCapsules().Count}");
-                    _waypoints = null;
-                    _droneControlling = null;
-                    return false;
-                }
-
-                List<Node> nodes = new();
-                foreach (Vector3 pos in aStarPath)
-                {
-                    nodes.Add(new Node(pos.x, pos.z));
-                }
-
-                if (nodes.Count < 2)
-                {
-                    Debug.LogWarning("MakePath failed: not enough nodes.");
-                    _waypoints = null;
-                    _droneControlling = null;
-                    return false;
-                }
-
-                _waypoints = nodes;
-                _droneControlling = new DroneControlling(_waypoints, _goalPosition, _initialDroneState, movementController);
-                _lastPathPlanStep = _agent.GetStepsSinceMatchStart();
-                return true;
+            if (aStarPath == null || aStarPath.Count < 2)
+            {
+                Debug.LogWarning(
+                    $"MakePath failed: no valid A* path. " +
+                    $"agent={name} role={_assignedRole} mode={_currentMode} decision={_lastDecision?.DebugLabel ?? "-"} reason={_btReason} " +
+                    $"ownTerritoryOnly={ownTerritoryOnly} enforcedOwnTerritory={enforceOwnTerritoryPath} " +
+                    $"start={curPos} goal={_goalPosition} startTrav={startTrav} goalTrav={goalTrav} " +
+                    $"dynamicObstacles={dynamicPathObstacles.Count} capsuleObstacles={originalCapsuleObstacleCount} " +
+                    $"yieldObstacles={teammateYieldObstacleCount} activeCapsules={GetActiveCapsules().Count}");
+                _waypoints = null;
+                _droneControlling = null;
+                return false;
             }
+
+            List<Node> nodes = new();
+            foreach (Vector3 pos in aStarPath)
+            {
+                nodes.Add(new Node(pos.x, pos.z));
+            }
+
+            if (nodes.Count < 2)
+            {
+                Debug.LogWarning("MakePath failed: not enough nodes.");
+                _waypoints = null;
+                _droneControlling = null;
+                return false;
+            }
+
+            _waypoints = nodes;
+            _droneControlling = new DroneControlling(_waypoints, _goalPosition, _initialDroneState, movementController);
+            _lastPathPlanStep = _agent.GetStepsSinceMatchStart();
+            return true;
         }
         
         
@@ -711,8 +711,6 @@ namespace PacMan.Agent
         /// </summary>
         private void UpdateVoronoiData()
         {
-            using var timingScope = DebugManager.BeginTimingScope("Voronoi");
-
             // If agent is Powered
             if (_agent.IsPoweredUp())
             {
@@ -944,8 +942,6 @@ namespace PacMan.Agent
 
         private DefenderBlackboard BuildDefenderBlackboard()
         {
-            using var timingScope = DebugManager.BeginTimingScope("Defender Blackboard");
-
             DefenderBlackboard bb = new DefenderBlackboard();
 
             Vector3 myPos = transform.localPosition;
@@ -1110,8 +1106,6 @@ namespace PacMan.Agent
         }
         private AttackerBlackboard BuildAttackerBlackboard()
         {
-            using var timingScope = DebugManager.BeginTimingScope("Attacker Blackboard");
-
             AttackerBlackboard bb = new AttackerBlackboard();
 
              Vector3 myPos = transform.localPosition;
@@ -1389,61 +1383,58 @@ namespace PacMan.Agent
 
         public List<TrackedEnemyInfo> GetTrackedEnemies()
         {
-            using (DebugManager.BeginTimingScope("Tracked Enemies"))
+            var tracked = new Dictionary<int, TrackedEnemyInfo>();
+            var tracker = EnemyTrackerManager.Instance;
+            var observations = _agent.GetEnemyObservations();
+
+            if (observations.Observations != null)
             {
-                var tracked = new Dictionary<int, TrackedEnemyInfo>();
-                var tracker = EnemyTrackerManager.Instance;
-                var observations = _agent.GetEnemyObservations();
-
-                if (observations.Observations != null)
+                foreach (var observation in observations.Observations)
                 {
-                    foreach (var observation in observations.Observations)
+                    if (observation.ServerIndex < 0)
+                        continue;
+
+                    Vector3 estimatedPosition = Vector3.zero;
+                    bool hasEstimate = tracker != null &&
+                                       tracker.TryGetEstimate(observation.ServerIndex, out estimatedPosition);
+                    bool hasObservationPosition = observation.Visible || observation.Position != Vector3.zero;
+
+                    if (!hasEstimate && !hasObservationPosition)
+                        continue;
+
+                    tracked[observation.ServerIndex] = new TrackedEnemyInfo
                     {
-                        if (observation.ServerIndex < 0)
-                            continue;
-
-                        Vector3 estimatedPosition = Vector3.zero;
-                        bool hasEstimate = tracker != null &&
-                                           tracker.TryGetEstimate(observation.ServerIndex, out estimatedPosition);
-                        bool hasObservationPosition = observation.Visible || observation.Position != Vector3.zero;
-
-                        if (!hasEstimate && !hasObservationPosition)
-                            continue;
-
-                        tracked[observation.ServerIndex] = new TrackedEnemyInfo
-                        {
-                            ServerIndex = observation.ServerIndex,
-                            Position = hasObservationPosition ? observation.Position : estimatedPosition,
-                            IsGhost = observation.IsGhost,
-                            IsVisible = observation.Visible,
-                            HasFood = observation.HasFood,
-                            HasPosition = true
-                        };
-                    }
+                        ServerIndex = observation.ServerIndex,
+                        Position = hasObservationPosition ? observation.Position : estimatedPosition,
+                        IsGhost = observation.IsGhost,
+                        IsVisible = observation.Visible,
+                        HasFood = observation.HasFood,
+                        HasPosition = true
+                    };
                 }
-
-                var visibleEnemies = _agent.GetVisibleEnemyAgents();
-                if (visibleEnemies != null)
-                {
-                    foreach (var enemy in visibleEnemies)
-                    {
-                        if (enemy == null || enemy.serverIndex < 0)
-                            continue;
-                        
-                        tracked[enemy.serverIndex] = new TrackedEnemyInfo
-                        {
-                            ServerIndex = enemy.serverIndex,
-                            Position = enemy.transform.localPosition,
-                            IsGhost = enemy.IsGhost(),
-                            IsVisible = true,
-                            HasFood = enemy.GetCarriedFoodCount() > 0,
-                            HasPosition = true
-                        };
-                    }
-                }
-
-                return tracked.Values.ToList();
             }
+
+            var visibleEnemies = _agent.GetVisibleEnemyAgents();
+            if (visibleEnemies != null)
+            {
+                foreach (var enemy in visibleEnemies)
+                {
+                    if (enemy == null || enemy.serverIndex < 0)
+                        continue;
+                    
+                    tracked[enemy.serverIndex] = new TrackedEnemyInfo
+                    {
+                        ServerIndex = enemy.serverIndex,
+                        Position = enemy.transform.localPosition,
+                        IsGhost = enemy.IsGhost(),
+                        IsVisible = true,
+                        HasFood = enemy.GetCarriedFoodCount() > 0,
+                        HasPosition = true
+                    };
+                }
+            }
+
+            return tracked.Values.ToList();
         }
 
         private Vector3 GetAttackPatrolPoint(Vector3 anchor)
@@ -1479,8 +1470,6 @@ namespace PacMan.Agent
 
         private Vector3 GetSafestHomePoint()
         {
-            using var timingScope = DebugManager.BeginTimingScope("Safest Home Point");
-
             bool isBlue = TeamAssignmentUtil.CheckTeam(gameObject) == Team.Blue;
             List<Vector3> homePoints = isBlue
                 ? _middleInfo.MiddleLeftLocalPositions
@@ -1528,8 +1517,6 @@ namespace PacMan.Agent
 
         private float GetReturnHomeLaneSafetyScore(Vector3 fromPosition, Vector3 retreatPoint, List<Vector3> enemyPositions)
         {
-            using var timingScope = DebugManager.BeginTimingScope("Return Home Lane Safety");
-
             float score = 0f;
             int samples = Mathf.Max(2, returnHomeLaneDangerSampleCount);
             float minEnemyDistance = float.MaxValue;
@@ -2663,23 +2650,20 @@ namespace PacMan.Agent
             out int capsuleObstacleCount,
             out int teammateYieldObstacleCount)
         {
-            using (DebugManager.BeginTimingScope("Dynamic Path Obstacles"))
+            var capsuleObstaclePoints = GetInflatedCapsuleObstaclePoints().ToList();
+            capsuleObstacleCount = capsuleObstaclePoints.Count;
+            teammateYieldObstacleCount = 0;
+            var dynamicPathObstacles = new List<Vector3>(capsuleObstaclePoints);
+
+            if (IsTeammateYieldObstacleActive() &&
+                Vector3.Distance(_teammateYieldObstaclePosition, goalPosition) > teammateYieldGoalIgnoreRadius)
             {
-                var capsuleObstaclePoints = GetInflatedCapsuleObstaclePoints().ToList();
-                capsuleObstacleCount = capsuleObstaclePoints.Count;
-                teammateYieldObstacleCount = 0;
-                var dynamicPathObstacles = new List<Vector3>(capsuleObstaclePoints);
-
-                if (IsTeammateYieldObstacleActive() &&
-                    Vector3.Distance(_teammateYieldObstaclePosition, goalPosition) > teammateYieldGoalIgnoreRadius)
-                {
-                    var yieldObstaclePoints = GetInflatedTeammateYieldObstaclePoints().ToList();
-                    teammateYieldObstacleCount = yieldObstaclePoints.Count;
-                    dynamicPathObstacles.AddRange(yieldObstaclePoints);
-                }
-
-                return dynamicPathObstacles;
+                var yieldObstaclePoints = GetInflatedTeammateYieldObstaclePoints().ToList();
+                teammateYieldObstacleCount = yieldObstaclePoints.Count;
+                dynamicPathObstacles.AddRange(yieldObstaclePoints);
             }
+
+            return dynamicPathObstacles;
         }
 
         private Vector3 ClampToOwnTerritoryEdge(Vector3 localPosition)
@@ -2998,12 +2982,12 @@ namespace PacMan.Agent
             if (FormationAnchor == Vector3.zero)
             {
                 Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
-                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.3f, maxRadiusSteps: 24);
                 Debug.Log("Trying to move to team, but no formation-anchor is assigned.");
             }
             else
             {
-                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.3f, maxRadiusSteps: 24);
             }
             
             if (_obstacleMap == null ||
@@ -3019,7 +3003,7 @@ namespace PacMan.Agent
                 return pursuitAcceleration;
             }
             
-            return MoveToTarget(interceptTarget, arriveDistance: 0.25f, ownTerritoryOnly: false);
+            return MoveToTarget(interceptTarget, arriveDistance: 0.05f, ownTerritoryOnly: false);
         }
         
         private Vector2 ExecuteInterceptIntruder(BTDecision decision)
