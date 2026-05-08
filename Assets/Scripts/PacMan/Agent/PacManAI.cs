@@ -3234,9 +3234,8 @@ namespace PacMan.Agent
             if (DebugManager.Instance != null && DebugManager.Instance.middle)
             {
                 DrawMiddleGizmos();
+                DrawDefenderLaneFoodPileRadiusGizmo();
             }
-
-            DrawDefenderLaneFoodPileRadiusGizmo();
             
             if (_voronoiPartitioning != null && _currentVoronoi != null)
             {

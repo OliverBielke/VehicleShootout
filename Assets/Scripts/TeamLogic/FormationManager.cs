@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using PacMan.Agent;
+using PacMan.Agent.Debugging;
 using PacMan.Local;
 using UnityEngine;
 using UnityEngine.PlayerLoop;
@@ -139,7 +140,10 @@ public class FormationManager : MonoBehaviour
         if (Physics.SphereCast(formation.Center + Vector3.up*2f, minSpace, Vector3.down, out RaycastHit hit, 2f, 
                 layerMask: LayerMask.GetMask("Obstacle")))
         {
-            Debug.DrawLine(formation.Center, hit.point, Color.red, 1f);
+            if (DebugManager.Instance != null && DebugManager.Instance.visualizeGroups)
+            {
+                Debug.DrawLine(formation.Center, hit.point, Color.red, 1f);
+            }
             return IShape.NoShape;
         }
         else
@@ -214,21 +218,20 @@ public class FormationManager : MonoBehaviour
     
     
     // Visualizations
-    public bool VisualizeGroups = true;
     private void OnDrawGizmos()
     {
-        if (VisualizeGroups)
+        if (DebugManager.Instance == null || !DebugManager.Instance.visualizeGroups)
+            return;
+
+        foreach (KeyValuePair<PacManAgentManager, FormationInformation> pair in Groups)
         {
-            foreach (KeyValuePair<PacManAgentManager, FormationInformation> pair in Groups)
-            {
-                if (pair.Value.Positions == null)
-                    continue;
+            if (pair.Value.Positions == null)
+                continue;
                 
-                foreach (Vector3 pos in pair.Value.Positions)
-                {
-                    Gizmos.color = Color.red;
-                    Gizmos.DrawSphere(pos, 0.25f);
-                }
+            foreach (Vector3 pos in pair.Value.Positions)
+            {
+                Gizmos.color = Color.red;
+                Gizmos.DrawSphere(pos, 0.25f);
             }
         }
     }

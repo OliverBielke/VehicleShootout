@@ -21,7 +21,7 @@ namespace PacMan.Agent.Debugging
         [Tooltip("Show the generated Obstacle Grid Map")]
         public bool obstacleMap;
 
-        [Tooltip("Show the Division of the Middle")]
+        [Tooltip("Show the Division of the Middle and defender lane-food seed/chain gizmos")]
         public bool middle;
         
         [Tooltip("Show the Voronoi Partitioning")]
@@ -41,6 +41,9 @@ namespace PacMan.Agent.Debugging
 
         [Tooltip("Show role/mode/reason labels above agents")]
         public bool agentHud = true;
+
+        [Tooltip("Show team/group assignment and formation debug visualizations")]
+        public bool visualizeGroups;
 
         [Header("Timing Debugging")]
         [Tooltip("Enable aggregate timing capture for AI hot paths like Voronoi and A*")]

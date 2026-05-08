@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using PacMan;
 using PacMan.Agent;
+using PacMan.Agent.Debugging;
 using PacMan.Game;
 using PacMan.Local;
 using UnityEngine;
@@ -335,13 +336,9 @@ public class TeamAssigner : MonoBehaviour
         
         return closeFriendlies;
     }
-
-
-    [SerializeField] private bool _visualizeGroups = false;
-
     private void OnDrawGizmos()
     {
-        if (!_visualizeGroups)
+        if (DebugManager.Instance == null || !DebugManager.Instance.visualizeGroups)
             return;
 
         DrawGroupGizmos(MembersByLeaderRed, 0.0f, 1f, 1f); // warm colors for red team
