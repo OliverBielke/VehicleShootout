@@ -16,6 +16,8 @@ namespace PacMan.Agent.PathFinding
         private readonly int _voronoiCellScale;
         private readonly float _dangerPenaltyMultiplier;
         private Dictionary<Vector2Int, VoronoiCellData> _voronoiMap;
+        // Keep original dynamic blocked world positions for short-lived debug drawing
+        private readonly List<Vector3> _dynamicBlockedPositions;
         
         /// <summary>
         /// Creates an A* planner with optional dynamic obstacles, territory constraints, and coarse Voronoi lookup scaling.
@@ -24,6 +26,7 @@ namespace PacMan.Agent.PathFinding
         /// <param name="dynamicBlockedPositions">Optional runtime positions to treat as blocked cells.</param>
         /// <param name="additionalTraversability">Optional extra traversability rule evaluated in world space.</param>
         /// <param name="voronoiCellScale">How many A* cells map to one Voronoi cell per axis.</param>
+        /// <param name="dangerPenaltyMultiplier">Multiplier used to scale Voronoi danger into A* movement cost (>=1).</param>
         public Astar(
             ObstacleMapV2 obstacleMap,
             IEnumerable<Vector3> dynamicBlockedPositions = null,
@@ -33,6 +36,7 @@ namespace PacMan.Agent.PathFinding
         {
             _obstacleMap = obstacleMap;
             _dynamicBlockedCells = new HashSet<Vector2Int>();
+            _dynamicBlockedPositions = dynamicBlockedPositions != null ? dynamicBlockedPositions.ToList() : new List<Vector3>();
             _additionalTraversability = additionalTraversability;
             _voronoiCellScale = Mathf.Max(1, voronoiCellScale);
             _dangerPenaltyMultiplier = Mathf.Max(1f, dangerPenaltyMultiplier);
@@ -40,7 +44,7 @@ namespace PacMan.Agent.PathFinding
             if (dynamicBlockedPositions == null || _obstacleMap == null)
                 return;
 
-            foreach (var position in dynamicBlockedPositions)
+            foreach (var position in _dynamicBlockedPositions)
             {
                 var cell = ToCellKey(position);
                 _dynamicBlockedCells.Add(cell);
@@ -83,6 +87,33 @@ namespace PacMan.Agent.PathFinding
 
                 Debug.DrawLine(goalWorld + new Vector3(-markerSize, 0, -markerSize), goalWorld + new Vector3(markerSize, 0, markerSize), Color.red, 3f);
                 Debug.DrawLine(goalWorld + new Vector3(-markerSize, 0, markerSize), goalWorld + new Vector3(markerSize, 0, -markerSize), Color.red, 3f);
+
+                // Draw dynamic blocked cells as short-lived red squares (similar to Voronoi cells but using Debug lines)
+                if (_dynamicBlockedPositions != null && _dynamicBlockedPositions.Count > 0 && _obstacleMap != null)
+                {
+                    foreach (var worldPos in _dynamicBlockedPositions)
+                    {
+                        Vector3Int cell3 = _obstacleMap.WorldToCell(worldPos);
+                        Vector3 cellWorld = _obstacleMap.CellToWorld(cell3);
+                        Vector3 half = _obstacleMap.trueScale * 0.5f;
+                        Vector3 center = cellWorld + half;
+
+                        Vector3 bl = center + new Vector3(-half.x, 0, -half.z);
+                        Vector3 br = center + new Vector3(half.x, 0, -half.z);
+                        Vector3 tl = center + new Vector3(-half.x, 0, half.z);
+                        Vector3 tr = center + new Vector3(half.x, 0, half.z);
+
+                        // Perimeter
+                        Debug.DrawLine(bl, br, Color.red, 3f);
+                        Debug.DrawLine(br, tr, Color.red, 3f);
+                        Debug.DrawLine(tr, tl, Color.red, 3f);
+                        Debug.DrawLine(tl, bl, Color.red, 3f);
+
+                        // Cross to make it more visible
+                        Debug.DrawLine(bl, tr, Color.red, 3f);
+                        Debug.DrawLine(br, tl, Color.red, 3f);
+                    }
+                }
             }
             
             if (!IsTraversableAStar(goalCell))

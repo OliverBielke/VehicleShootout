@@ -215,6 +215,7 @@ MonoBehaviour:
   teammateYieldSettledTargetDistance: 0.45
   teammateYieldReleaseDistance: 1.1
   teamLeadDistance: 1.5
+  FormationAnchor: {x: 0, y: 0, z: 0}
 --- !u!1 &5824477697522828855
 GameObject:
   m_ObjectHideFlags: 0

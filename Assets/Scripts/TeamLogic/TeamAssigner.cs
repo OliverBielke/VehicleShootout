@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using PacMan;
 using PacMan.Agent;
+using PacMan.Agent.Debugging;
+using PacMan.Game;
 using PacMan.Local;
 using UnityEngine;
 
@@ -90,6 +92,10 @@ public class TeamAssigner : MonoBehaviour
 
             var newLeaderAI = newLeader.GetComponent<PacManAIDebugBT>();
             var oldLeaderAI = deadLeader.GetComponent<PacManAIDebugBT>();
+            if (newLeaderAI != null && oldLeaderAI != null)
+            {
+                newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
+            }
             
             // Update FormationManager with the new leader
             if (FormationManager.Instance != null)
@@ -160,7 +166,6 @@ public class TeamAssigner : MonoBehaviour
     {
         ClearAssignments(isBlueTeam);
         List<PacManAgentManager> agents = isBlueTeam ? BlueAgents : RedAgents;
-        Debug.Log("Creating teams for " + agents.Count + " agents");
         Dictionary<PacManAgentManager, List<PacManAgentManager>> membersByLeader =
             isBlueTeam ? MembersByLeaderBlue : MembersByLeaderRed;
         Dictionary<PacManAgentManager, PacManAgentManager> leaderByMember =
@@ -170,7 +175,7 @@ public class TeamAssigner : MonoBehaviour
         int totalCapacity = 0;
         //List<PacManAgentManager> newLeaders = new List<PacManAgentManager>();
         int firstMemberIndex = -1;
-        
+
         for (int i = 0; i < agents.Count; i++)
         {
             if (totalCapacity >= agents.Count - i)
@@ -370,13 +375,9 @@ public class TeamAssigner : MonoBehaviour
         
         return closeFriendlies;
     }
-
-
-    [SerializeField] private bool _visualizeGroups = false;
-
     private void OnDrawGizmos()
     {
-        if (!_visualizeGroups)
+        if (DebugManager.Instance == null || !DebugManager.Instance.visualizeGroups)
             return;
 
         DrawGroupGizmos(MembersByLeaderRed, 0.0f, 1f, 1f); // warm colors for red team
