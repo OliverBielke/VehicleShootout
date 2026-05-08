@@ -163,7 +163,8 @@ namespace PacMan.Agent
         private Vector2 _teammateYieldBackoffAcceleration = Vector2.zero;
         private bool _teammateYieldWaitingForSeparation = false;
         private static GUIStyle _agentHudStyle;
-
+        private Vector3 _lastTargetPosition = Vector3.zero;
+        
         // Fine grid is 0.2 and Voronoi grid is 1.0, so each coarse cell spans 5x5 fine cells.
         private const int VoronoiCellScaleFactor = 5; // fine 0.2 grid to coarse 1.0 grid
         private const float AnchorReachedDistance = 0.35f;
@@ -176,7 +177,8 @@ namespace PacMan.Agent
         public bool HasDefenseAnchor => _hasDefenseAnchor;
         public Vector3 AttackAnchor => _attackAnchor;
         public bool HasAttackAnchor => _hasAttackAnchor;
-
+        public Vector3 LastTargetPosition => _lastTargetPosition;
+        public Vector3 FormationAnchor = Vector3.zero;
         public void SetAssignedRole(StaticRole role)
         {
             _staticAssignedRole = role;
@@ -2592,6 +2594,8 @@ namespace PacMan.Agent
             if (decision == null)
                 return Vector2.zero;
 
+            _lastTargetPosition = decision.TargetPosition;
+            
             switch (decision.DebugLabel)
             {
                 case "MoveToLeader":
@@ -2989,9 +2993,19 @@ namespace PacMan.Agent
                 ClearCurrentPath();
                 return Vector2.zero;
             }
+
+            Vector3 interceptTarget;
+            if (FormationAnchor == Vector3.zero)
+            {
+                Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
+                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+                Debug.Log("Trying to move to team, but no formation-anchor is assigned.");
+            }
+            else
+            {
+                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.2f, maxRadiusSteps: 24);
+            }
             
-            Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
-            Vector3 interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, IsInOwnTerritory, radiusStep: 0.2f, maxRadiusSteps: 24);
             if (_obstacleMap == null ||
                 _obstacleMap.GetLocalPointTraversibility(interceptTarget) != ObstacleMapV2.Traversability.Free)
             {
