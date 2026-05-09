@@ -359,34 +359,31 @@ namespace PacMan.Agent
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
-            var timingSection = _assignedRole == StaticRole.Defend
-                ? "AI/Decision/DefenderTree"
-                : _assignedRole == StaticRole.Attack
-                    ? "AI/Decision/AttackerTree"
-                    : "AI/Decision/NoRole";
-
-            using (DebugManager.BeginTimingScope(timingSection))
+            switch (_assignedRole)
             {
-                switch (_assignedRole)
+                case StaticRole.Defend:
                 {
-                    case StaticRole.Defend:
+                    DefenderBlackboard bb = BuildDefenderBlackboard();
+                    _btReason = bb.debugReason;
+                    using (DebugManager.BeginTimingScope("AI/Decision/DefenderTree"))
                     {
-                        DefenderBlackboard bb = BuildDefenderBlackboard();
-                        _btReason = bb.debugReason;
                         return _defenderTree.Evaluate(bb);
                     }
+                }
 
-                    case StaticRole.Attack:
+                case StaticRole.Attack:
+                {
+                    AttackerBlackboard bb = BuildAttackerBlackboard();
+                    _btReason = bb.debugReason;
+                    using (DebugManager.BeginTimingScope("AI/Decision/AttackerTree"))
                     {
-                        AttackerBlackboard bb = BuildAttackerBlackboard();
-                        _btReason = bb.debugReason;
                         return _attackerTree.Evaluate(bb);
                     }
-
-                    default:
-                        _btReason = "No assigned role";
-                        return BTDecision.Running(AgentMode.Patrol, "NoRole");
                 }
+
+                default:
+                    _btReason = "No assigned role";
+                    return BTDecision.Running(AgentMode.Patrol, "NoRole");
             }
         }
         
@@ -671,10 +668,7 @@ namespace PacMan.Agent
             //     $"hasDefenseAnchor={_hasDefenseAnchor} | defenseAnchor={_defenseAnchor}"
             // );
 
-            using (DebugManager.BeginTimingScope("AI/Path/VoronoiRefresh"))
-            {
-                UpdateVoronoiData();
-            }
+            UpdateVoronoiData();
 
             bool enforceOwnTerritoryPath =
                 ownTerritoryOnly &&
@@ -740,48 +734,51 @@ namespace PacMan.Agent
         /// </summary>
         private void UpdateVoronoiData()
         {
-            // If agent is Powered
-            if (_agent.IsPoweredUp())
+            using (DebugManager.BeginTimingScope("AI/Path/VoronoiRefresh"))
             {
-                _currentVoronoi = null;
-                return;
+                // If agent is Powered
+                if (_agent.IsPoweredUp())
+                {
+                    _currentVoronoi = null;
+                    return;
+                }
+
+                bool isBlue = TeamAssignmentUtil.CheckTeam(gameObject) == Team.Blue;
+                bool isOnOpponentSide = isBlue ? transform.localPosition.x > 0 : transform.localPosition.x < 0;
+                bool goalOnOpponentSide = _hasGoal && !IsInOwnTerritory(_goalPosition);
+                Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
+                bool hasEnemyFoodTargets = _agent.GetFoodObjects().Any(food =>
+                    food != null && food.activeSelf && TeamAssignmentUtil.CheckTeam(food) != myTeam);
+                bool hasEnemyCapsuleTargets = _agent.GetCapsuleObjects().Any(capsule =>
+                    capsule != null && capsule.activeSelf && TeamAssignmentUtil.CheckTeam(capsule) != myTeam);
+                bool shouldEvaluateEnemyObjectives = _assignedRole == StaticRole.Attack && (hasEnemyFoodTargets || hasEnemyCapsuleTargets);
+                bool shouldUseVoronoi = isOnOpponentSide || goalOnOpponentSide || shouldEvaluateEnemyObjectives;
+
+                if (!shouldUseVoronoi)
+                {
+                    _currentVoronoi = null;
+                    return;
+                }
+
+                int interval = Mathf.Max(1, _voronoiUpdateIntervalSteps);
+                int currentStep = _agent.GetStepsSinceMatchStart();
+                int phase = GetVoronoiUpdatePhase(interval);
+                bool mustBootstrap = _currentVoronoi == null;
+                bool dueByInterval = (currentStep - _lastVoronoiUpdateStep) >= interval;
+                bool onStaggerSlot = ((currentStep + phase) % interval) == 0;
+
+                if (!mustBootstrap && !(dueByInterval && onStaggerSlot))
+                    return;
+
+                var enemyPositions = GetTrackedEnemies()
+                    .Where(enemy => enemy != null && enemy.HasPosition)
+                    .Select(enemy => enemy.Position)
+                    .ToList();
+
+                // Compute full Voronoi and keep visualization filtering in OnDrawGizmos.
+                _currentVoronoi = _voronoiPartitioning.ComputeVoronoi(transform.localPosition, enemyPositions);
+                _lastVoronoiUpdateStep = currentStep;
             }
-
-            bool isBlue = TeamAssignmentUtil.CheckTeam(gameObject) == Team.Blue;
-            bool isOnOpponentSide = isBlue ? transform.localPosition.x > 0 : transform.localPosition.x < 0;
-            bool goalOnOpponentSide = _hasGoal && !IsInOwnTerritory(_goalPosition);
-            Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
-            bool hasEnemyFoodTargets = _agent.GetFoodObjects().Any(food =>
-                food != null && food.activeSelf && TeamAssignmentUtil.CheckTeam(food) != myTeam);
-            bool hasEnemyCapsuleTargets = _agent.GetCapsuleObjects().Any(capsule =>
-                capsule != null && capsule.activeSelf && TeamAssignmentUtil.CheckTeam(capsule) != myTeam);
-            bool shouldEvaluateEnemyObjectives = _assignedRole == StaticRole.Attack && (hasEnemyFoodTargets || hasEnemyCapsuleTargets);
-            bool shouldUseVoronoi = isOnOpponentSide || goalOnOpponentSide || shouldEvaluateEnemyObjectives;
-
-            if (!shouldUseVoronoi)
-            {
-                _currentVoronoi = null;
-                return;
-            }
-
-            int interval = Mathf.Max(1, _voronoiUpdateIntervalSteps);
-            int currentStep = _agent.GetStepsSinceMatchStart();
-            int phase = GetVoronoiUpdatePhase(interval);
-            bool mustBootstrap = _currentVoronoi == null;
-            bool dueByInterval = (currentStep - _lastVoronoiUpdateStep) >= interval;
-            bool onStaggerSlot = ((currentStep + phase) % interval) == 0;
-
-            if (!mustBootstrap && !(dueByInterval && onStaggerSlot))
-                return;
-
-            var enemyPositions = GetTrackedEnemies()
-                .Where(enemy => enemy != null && enemy.HasPosition)
-                .Select(enemy => enemy.Position)
-                .ToList();
-
-            // Compute full Voronoi and keep visualization filtering in OnDrawGizmos.
-            _currentVoronoi = _voronoiPartitioning.ComputeVoronoi(transform.localPosition, enemyPositions);
-            _lastVoronoiUpdateStep = currentStep;
         }
 
         /// <summary>
@@ -975,6 +972,8 @@ namespace PacMan.Agent
 
             Vector3 myPos = transform.localPosition;
             UpdateVoronoiData();
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard"))
+            {
             var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
             var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
                                                 TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
@@ -1131,6 +1130,8 @@ namespace PacMan.Agent
             if (string.IsNullOrEmpty(bb.debugReason))
                 bb.debugReason = "Default defend state";
 
+            }
+
             return bb;
         }
         private AttackerBlackboard BuildAttackerBlackboard()
@@ -1139,6 +1140,8 @@ namespace PacMan.Agent
 
              Vector3 myPos = transform.localPosition;
              UpdateVoronoiData();
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard"))
+            {
              var trackedEnemies = GetTrackedEnemies();
              var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
                                                  TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
@@ -1406,6 +1409,8 @@ namespace PacMan.Agent
                 bb.debugReason = "Outside attack zone";
             else
                 bb.debugReason = "Patrol attack zone";
+
+            }
 
             return bb;
         }
