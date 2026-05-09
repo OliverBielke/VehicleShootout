@@ -273,63 +273,64 @@ namespace PacMan.Agent
         
         public override PacManAction Tick()
         {
-            _agent.GetTimeRemaining();
-            _agent.GetScore();
-                
-            
             Vector3 velocity = _agent.GetVelocity();
             int carriedFoodCount = _agent.GetCarriedFoodCount();
 
-            int currentRespawnStep = _agent.GetLastRespawnStep();
-            if (_lastKnownRespawnStep != currentRespawnStep)
+            using (DebugManager.BeginTimingScope("AI/Tick/PreDecision"))
             {
-                ClearCurrentPath();
-                _lastKnownRespawnStep = currentRespawnStep;
-                _attackerThreatRetreatActive = false;
-                _previousCarriedFoodCount = carriedFoodCount;
-                _attackerRegroupAfterReturnHome = false;
-                _lastPlannedUnsafeCellCount = 0;
-                _hasLatchedHomeTarget = false;
-                _lastHomeTargetRefreshStep = -99999;
-                _lastScaredCounterRaidTargetStep = -99999;
-                _teammateYieldBackoffUntilStep = -1;
-                _teammateYieldObstacleUntilStep = -1;
-                _teammateYieldRetriggerBlockedUntilStep = -1;
-                _teammateYieldWaitingForSeparation = false;
-                TeamAssigner.Instance.SwapTeamLeader(_agent);
-            }
+                _agent.GetTimeRemaining();
+                _agent.GetScore();
 
-            RegisterConsumedEnemyCapsuleFromTeamPositions();
-
-            TryTriggerTeammateYield();
-
-            if (IsTeammateYieldBackoffActive())
-            {
-                ClearCurrentPath();
-                _previousMode = _currentMode;
-                _btReason = "Yielding to teammate";
-                _previousCarriedFoodCount = carriedFoodCount;
-                return new PacManAction
+                int currentRespawnStep = _agent.GetLastRespawnStep();
+                if (_lastKnownRespawnStep != currentRespawnStep)
                 {
-                    Acceleration = _teammateYieldBackoffAcceleration
-                };
+                    ClearCurrentPath();
+                    _lastKnownRespawnStep = currentRespawnStep;
+                    _attackerThreatRetreatActive = false;
+                    _previousCarriedFoodCount = carriedFoodCount;
+                    _attackerRegroupAfterReturnHome = false;
+                    _lastPlannedUnsafeCellCount = 0;
+                    _hasLatchedHomeTarget = false;
+                    _lastHomeTargetRefreshStep = -99999;
+                    _lastScaredCounterRaidTargetStep = -99999;
+                    _teammateYieldBackoffUntilStep = -1;
+                    _teammateYieldObstacleUntilStep = -1;
+                    _teammateYieldRetriggerBlockedUntilStep = -1;
+                    _teammateYieldWaitingForSeparation = false;
+                    TeamAssigner.Instance.SwapTeamLeader(_agent);
+                }
+
+                RegisterConsumedEnemyCapsuleFromTeamPositions();
+
+                TryTriggerTeammateYield();
+
+                if (IsTeammateYieldBackoffActive())
+                {
+                    ClearCurrentPath();
+                    _previousMode = _currentMode;
+                    _btReason = "Yielding to teammate";
+                    _previousCarriedFoodCount = carriedFoodCount;
+                    return new PacManAction
+                    {
+                        Acceleration = _teammateYieldBackoffAcceleration
+                    };
+                }
+
+                bool justDepositedFood =
+                    _assignedRole == StaticRole.Attack &&
+                    _previousCarriedFoodCount > 0 &&
+                    carriedFoodCount == 0 &&
+                    IsInOwnTerritory(transform.localPosition);
+
+                if (justDepositedFood)
+                {
+                    _attackerRegroupAfterReturnHome = true;
+                    ClearCurrentPath();
+                }
             }
 
-            bool justDepositedFood =
-                _assignedRole == StaticRole.Attack &&
-                _previousCarriedFoodCount > 0 &&
-                carriedFoodCount == 0 &&
-                IsInOwnTerritory(transform.localPosition);
-
-            if (justDepositedFood)
-            {
-                _attackerRegroupAfterReturnHome = true;
-                ClearCurrentPath();
-            }
-            
-            
-            
             _lastDecision = EvaluateCurrentRoleTree();
+
             _currentMode = _lastDecision.Mode;
 
             if (_currentMode != _previousMode)
@@ -358,25 +359,34 @@ namespace PacMan.Agent
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
-            switch (_assignedRole)
+            var timingSection = _assignedRole == StaticRole.Defend
+                ? "AI/Decision/DefenderTree"
+                : _assignedRole == StaticRole.Attack
+                    ? "AI/Decision/AttackerTree"
+                    : "AI/Decision/NoRole";
+
+            using (DebugManager.BeginTimingScope(timingSection))
             {
-                case StaticRole.Defend:
+                switch (_assignedRole)
                 {
-                    DefenderBlackboard bb = BuildDefenderBlackboard();
-                    _btReason = bb.debugReason;
-                    return _defenderTree.Evaluate(bb);
-                }
+                    case StaticRole.Defend:
+                    {
+                        DefenderBlackboard bb = BuildDefenderBlackboard();
+                        _btReason = bb.debugReason;
+                        return _defenderTree.Evaluate(bb);
+                    }
 
-                case StaticRole.Attack:
-                {
-                    AttackerBlackboard bb = BuildAttackerBlackboard();
-                    _btReason = bb.debugReason;
-                    return _attackerTree.Evaluate(bb);
-                }
+                    case StaticRole.Attack:
+                    {
+                        AttackerBlackboard bb = BuildAttackerBlackboard();
+                        _btReason = bb.debugReason;
+                        return _attackerTree.Evaluate(bb);
+                    }
 
-                default:
-                    _btReason = "No assigned role";
-                    return BTDecision.Running(AgentMode.Patrol, "NoRole");
+                    default:
+                        _btReason = "No assigned role";
+                        return BTDecision.Running(AgentMode.Patrol, "NoRole");
+                }
             }
         }
         
@@ -639,10 +649,17 @@ namespace PacMan.Agent
                 return false;
             }
             var curPos = _initialDroneState.localPosition;
-            var dynamicPathObstacles = BuildDynamicPathObstacles(
-                _goalPosition,
-                out int originalCapsuleObstacleCount,
-                out int teammateYieldObstacleCount);
+            List<Vector3> dynamicPathObstacles;
+            int originalCapsuleObstacleCount;
+            int teammateYieldObstacleCount;
+
+            using (DebugManager.BeginTimingScope("AI/Path/BuildObstacles"))
+            {
+                dynamicPathObstacles = BuildDynamicPathObstacles(
+                    _goalPosition,
+                    out originalCapsuleObstacleCount,
+                    out teammateYieldObstacleCount);
+            }
 
             var startTrav = _obstacleMap.GetLocalPointTraversibility(curPos);
             var goalTrav = _obstacleMap.GetLocalPointTraversibility(_goalPosition);
@@ -654,19 +671,27 @@ namespace PacMan.Agent
             //     $"hasDefenseAnchor={_hasDefenseAnchor} | defenseAnchor={_defenseAnchor}"
             // );
 
-            UpdateVoronoiData();
+            using (DebugManager.BeginTimingScope("AI/Path/VoronoiRefresh"))
+            {
+                UpdateVoronoiData();
+            }
+
             bool enforceOwnTerritoryPath =
                 ownTerritoryOnly &&
                 IsInOwnTerritory(curPos) &&
                 IsInOwnTerritory(_goalPosition);
 
-            Astar aStar = new Astar(
-                _obstacleMap,
-                dynamicPathObstacles,
-                enforceOwnTerritoryPath ? IsInOwnTerritory : null,
-                VoronoiCellScaleFactor,
-                voronoiPathDangerPenaltyMultiplier);
-            List<Vector3> aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
+            List<Vector3> aStarPath;
+            using (DebugManager.BeginTimingScope("AI/Path/AStar"))
+            {
+                Astar aStar = new Astar(
+                    _obstacleMap,
+                    dynamicPathObstacles,
+                    enforceOwnTerritoryPath ? IsInOwnTerritory : null,
+                    VoronoiCellScaleFactor,
+                    voronoiPathDangerPenaltyMultiplier);
+                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
+            }
 
             _lastPlannedGoalPosition = _goalPosition;
             _lastPlannedUnsafeCellCount = CountUnsafeCellsOnPath(aStarPath);
@@ -686,9 +711,12 @@ namespace PacMan.Agent
             }
 
             List<Node> nodes = new();
-            foreach (Vector3 pos in aStarPath)
+            using (DebugManager.BeginTimingScope("AI/Path/BuildWaypoints"))
             {
-                nodes.Add(new Node(pos.x, pos.z));
+                foreach (Vector3 pos in aStarPath)
+                {
+                    nodes.Add(new Node(pos.x, pos.z));
+                }
             }
 
             if (nodes.Count < 2)
