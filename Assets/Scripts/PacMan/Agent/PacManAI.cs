@@ -274,89 +274,95 @@ namespace PacMan.Agent
         
         public override PacManAction Tick()
         {
-            _agent.GetTimeRemaining();
-            _agent.GetScore();
-
-            
-            
-            Vector3 velocity = _agent.GetVelocity();
-            int carriedFoodCount = _agent.GetCarriedFoodCount();
-
-            int currentRespawnStep = _agent.GetLastRespawnStep();
-            if (_lastKnownRespawnStep != currentRespawnStep)
+            using (DebugManager.BeginTimingScope("Total"))
             {
-                ClearCurrentPath();
-                _lastKnownRespawnStep = currentRespawnStep;
-                _attackerThreatRetreatActive = false;
-                _previousCarriedFoodCount = carriedFoodCount;
-                _attackerRegroupAfterReturnHome = false;
-                _lastPlannedUnsafeCellCount = 0;
-                _hasLatchedHomeTarget = false;
-                _lastHomeTargetRefreshStep = -99999;
-                _lastScaredCounterRaidTargetStep = -99999;
-                _teammateYieldBackoffUntilStep = -1;
-                _teammateYieldObstacleUntilStep = -1;
-                _teammateYieldRetriggerBlockedUntilStep = -1;
-                _teammateYieldWaitingForSeparation = false;
-                TeamAssigner.Instance.SwapTeamLeader(_agent);
-            }
 
-            RegisterConsumedEnemyCapsuleFromTeamPositions();
 
-            TryTriggerTeammateYield();
+                Vector3 velocity = _agent.GetVelocity();
+                int carriedFoodCount = _agent.GetCarriedFoodCount();
 
-            if (IsTeammateYieldBackoffActive())
-            {
-                ClearCurrentPath();
+                using (DebugManager.BeginTimingScope("AI/Tick/PreDecision"))
+                {
+                    _agent.GetTimeRemaining();
+                    _agent.GetScore();
+
+                    int currentRespawnStep = _agent.GetLastRespawnStep();
+                    if (_lastKnownRespawnStep != currentRespawnStep)
+                    {
+                        ClearCurrentPath();
+                        _lastKnownRespawnStep = currentRespawnStep;
+                        _attackerThreatRetreatActive = false;
+                        _previousCarriedFoodCount = carriedFoodCount;
+                        _attackerRegroupAfterReturnHome = false;
+                        _lastPlannedUnsafeCellCount = 0;
+                        _hasLatchedHomeTarget = false;
+                        _lastHomeTargetRefreshStep = -99999;
+                        _lastScaredCounterRaidTargetStep = -99999;
+                        _teammateYieldBackoffUntilStep = -1;
+                        _teammateYieldObstacleUntilStep = -1;
+                        _teammateYieldRetriggerBlockedUntilStep = -1;
+                        _teammateYieldWaitingForSeparation = false;
+                        TeamAssigner.Instance.SwapTeamLeader(_agent);
+                    }
+
+                    RegisterConsumedEnemyCapsuleFromTeamPositions();
+
+                    TryTriggerTeammateYield();
+
+                    if (IsTeammateYieldBackoffActive())
+                    {
+                        ClearCurrentPath();
+                        _previousMode = _currentMode;
+                        _btReason = "Yielding to teammate";
+                        _previousCarriedFoodCount = carriedFoodCount;
+                        return new PacManAction
+                        {
+                            Acceleration = _teammateYieldBackoffAcceleration
+                        };
+                    }
+
+                    bool justDepositedFood =
+                        _assignedRole == StaticRole.Attack &&
+                        _previousCarriedFoodCount > 0 &&
+                        carriedFoodCount == 0 &&
+                        IsInOwnTerritory(transform.localPosition);
+
+                    if (justDepositedFood)
+                    {
+                        _attackerRegroupAfterReturnHome = true;
+                        ClearCurrentPath();
+                    }
+                }
+
+                _lastDecision = EvaluateCurrentRoleTree();
+
+                _currentMode = _lastDecision.Mode;
+
+                if (_currentMode != _previousMode)
+                {
+                    ClearCurrentPath();
+                }
+
+                Vector2 accel = ExecuteDecision(_lastDecision, velocity);
+
                 _previousMode = _currentMode;
-                _btReason = "Yielding to teammate";
                 _previousCarriedFoodCount = carriedFoodCount;
+
+                var teamManager = TeamAssigner.Instance;
+                bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||
+                                teamManager.MembersByLeaderRed.ContainsKey(_agent);
+                Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
+
+                if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
+                {
+                    accel *= 0f;
+                }
+
                 return new PacManAction
                 {
-                    Acceleration = _teammateYieldBackoffAcceleration
+                    Acceleration = accel
                 };
             }
-
-            bool justDepositedFood =
-                _assignedRole == StaticRole.Attack &&
-                _previousCarriedFoodCount > 0 &&
-                carriedFoodCount == 0 &&
-                IsInOwnTerritory(transform.localPosition);
-
-            if (justDepositedFood)
-            {
-                _attackerRegroupAfterReturnHome = true;
-                ClearCurrentPath();
-            }
-            
-            
-            
-            _lastDecision = EvaluateCurrentRoleTree();
-            _currentMode = _lastDecision.Mode;
-
-            if (_currentMode != _previousMode)
-            {
-                ClearCurrentPath();
-            }
-
-            Vector2 accel = ExecuteDecision(_lastDecision, velocity);
-
-            _previousMode = _currentMode;
-            _previousCarriedFoodCount = carriedFoodCount;
-            
-            var teamManager = TeamAssigner.Instance;
-            bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||  teamManager.MembersByLeaderRed.ContainsKey(_agent);
-            Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
-            
-            if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
-            {
-                accel *= 0f;
-            }
-            
-            return new PacManAction
-            {
-                Acceleration = accel
-            };
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
@@ -366,14 +372,20 @@ namespace PacMan.Agent
                 {
                     DefenderBlackboard bb = BuildDefenderBlackboard();
                     _btReason = bb.debugReason;
-                    return _defenderTree.Evaluate(bb);
+                    using (DebugManager.BeginTimingScope("AI/Decision/DefenderTree"))
+                    {
+                        return _defenderTree.Evaluate(bb);
+                    }
                 }
 
                 case StaticRole.Attack:
                 {
                     AttackerBlackboard bb = BuildAttackerBlackboard();
                     _btReason = bb.debugReason;
-                    return _attackerTree.Evaluate(bb);
+                    using (DebugManager.BeginTimingScope("AI/Decision/AttackerTree"))
+                    {
+                        return _attackerTree.Evaluate(bb);
+                    }
                 }
 
                 default:
@@ -641,10 +653,17 @@ namespace PacMan.Agent
                 return false;
             }
             var curPos = _initialDroneState.localPosition;
-            var dynamicPathObstacles = BuildDynamicPathObstacles(
-                _goalPosition,
-                out int originalCapsuleObstacleCount,
-                out int teammateYieldObstacleCount);
+            List<Vector3> dynamicPathObstacles;
+            int originalCapsuleObstacleCount;
+            int teammateYieldObstacleCount;
+
+            using (DebugManager.BeginTimingScope("AI/Path/BuildObstacles"))
+            {
+                dynamicPathObstacles = BuildDynamicPathObstacles(
+                    _goalPosition,
+                    out originalCapsuleObstacleCount,
+                    out teammateYieldObstacleCount);
+            }
 
             var startTrav = _obstacleMap.GetLocalPointTraversibility(curPos);
             var goalTrav = _obstacleMap.GetLocalPointTraversibility(_goalPosition);
@@ -657,18 +676,23 @@ namespace PacMan.Agent
             // );
 
             UpdateVoronoiData();
+
             bool enforceOwnTerritoryPath =
                 ownTerritoryOnly &&
                 IsInOwnTerritory(curPos) &&
                 IsInOwnTerritory(_goalPosition);
 
-            Astar aStar = new Astar(
-                _obstacleMap,
-                dynamicPathObstacles,
-                enforceOwnTerritoryPath ? IsInOwnTerritory : null,
-                VoronoiCellScaleFactor,
-                voronoiPathDangerPenaltyMultiplier);
-            List<Vector3> aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, GetTrackedEnemies().Select(e => e.Position).ToList(),_currentVoronoi);
+            List<Vector3> aStarPath;
+            using (DebugManager.BeginTimingScope("AI/Path/AStar"))
+            {
+                Astar aStar = new Astar(
+                    _obstacleMap,
+                    dynamicPathObstacles,
+                    enforceOwnTerritoryPath ? IsInOwnTerritory : null,
+                    VoronoiCellScaleFactor,
+                    voronoiPathDangerPenaltyMultiplier);
+                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, GetTrackedEnemies().Select(e => e.Position).ToList() ,_currentVoronoi);
+            }
 
             _lastPlannedGoalPosition = _goalPosition;
             _lastPlannedUnsafeCellCount = CountUnsafeCellsOnPath(aStarPath);
@@ -688,9 +712,12 @@ namespace PacMan.Agent
             }
 
             List<Node> nodes = new();
-            foreach (Vector3 pos in aStarPath)
+            using (DebugManager.BeginTimingScope("AI/Path/BuildWaypoints"))
             {
-                nodes.Add(new Node(pos.x, pos.z));
+                foreach (Vector3 pos in aStarPath)
+                {
+                    nodes.Add(new Node(pos.x, pos.z));
+                }
             }
 
             if (nodes.Count < 2)
@@ -714,48 +741,51 @@ namespace PacMan.Agent
         /// </summary>
         private void UpdateVoronoiData()
         {
-            // If agent is Powered
-            if (_agent.IsPoweredUp())
+            using (DebugManager.BeginTimingScope("AI/Path/VoronoiRefresh"))
             {
-                _currentVoronoi = null;
-                return;
+                // If agent is Powered
+                if (_agent.IsPoweredUp())
+                {
+                    _currentVoronoi = null;
+                    return;
+                }
+
+                bool isBlue = TeamAssignmentUtil.CheckTeam(gameObject) == Team.Blue;
+                bool isOnOpponentSide = isBlue ? transform.localPosition.x > 0 : transform.localPosition.x < 0;
+                bool goalOnOpponentSide = _hasGoal && !IsInOwnTerritory(_goalPosition);
+                Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
+                bool hasEnemyFoodTargets = _agent.GetFoodObjects().Any(food =>
+                    food != null && food.activeSelf && TeamAssignmentUtil.CheckTeam(food) != myTeam);
+                bool hasEnemyCapsuleTargets = _agent.GetCapsuleObjects().Any(capsule =>
+                    capsule != null && capsule.activeSelf && TeamAssignmentUtil.CheckTeam(capsule) != myTeam);
+                bool shouldEvaluateEnemyObjectives = _assignedRole == StaticRole.Attack && (hasEnemyFoodTargets || hasEnemyCapsuleTargets);
+                bool shouldUseVoronoi = isOnOpponentSide || goalOnOpponentSide || shouldEvaluateEnemyObjectives;
+
+                if (!shouldUseVoronoi)
+                {
+                    _currentVoronoi = null;
+                    return;
+                }
+
+                int interval = Mathf.Max(1, _voronoiUpdateIntervalSteps);
+                int currentStep = _agent.GetStepsSinceMatchStart();
+                int phase = GetVoronoiUpdatePhase(interval);
+                bool mustBootstrap = _currentVoronoi == null;
+                bool dueByInterval = (currentStep - _lastVoronoiUpdateStep) >= interval;
+                bool onStaggerSlot = ((currentStep + phase) % interval) == 0;
+
+                if (!mustBootstrap && !(dueByInterval && onStaggerSlot))
+                    return;
+
+                var enemyPositions = GetTrackedEnemies()
+                    .Where(enemy => enemy != null && enemy.HasPosition)
+                    .Select(enemy => enemy.Position)
+                    .ToList();
+
+                // Compute full Voronoi and keep visualization filtering in OnDrawGizmos.
+                _currentVoronoi = _voronoiPartitioning.ComputeVoronoi(transform.localPosition, enemyPositions);
+                _lastVoronoiUpdateStep = currentStep;
             }
-
-            bool isBlue = TeamAssignmentUtil.CheckTeam(gameObject) == Team.Blue;
-            bool isOnOpponentSide = isBlue ? transform.localPosition.x > 0 : transform.localPosition.x < 0;
-            bool goalOnOpponentSide = _hasGoal && !IsInOwnTerritory(_goalPosition);
-            Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
-            bool hasEnemyFoodTargets = _agent.GetFoodObjects().Any(food =>
-                food != null && food.activeSelf && TeamAssignmentUtil.CheckTeam(food) != myTeam);
-            bool hasEnemyCapsuleTargets = _agent.GetCapsuleObjects().Any(capsule =>
-                capsule != null && capsule.activeSelf && TeamAssignmentUtil.CheckTeam(capsule) != myTeam);
-            bool shouldEvaluateEnemyObjectives = _assignedRole == StaticRole.Attack && (hasEnemyFoodTargets || hasEnemyCapsuleTargets);
-            bool shouldUseVoronoi = isOnOpponentSide || goalOnOpponentSide || shouldEvaluateEnemyObjectives;
-
-            if (!shouldUseVoronoi)
-            {
-                _currentVoronoi = null;
-                return;
-            }
-
-            int interval = Mathf.Max(1, _voronoiUpdateIntervalSteps);
-            int currentStep = _agent.GetStepsSinceMatchStart();
-            int phase = GetVoronoiUpdatePhase(interval);
-            bool mustBootstrap = _currentVoronoi == null;
-            bool dueByInterval = (currentStep - _lastVoronoiUpdateStep) >= interval;
-            bool onStaggerSlot = ((currentStep + phase) % interval) == 0;
-
-            if (!mustBootstrap && !(dueByInterval && onStaggerSlot))
-                return;
-
-            var enemyPositions = GetTrackedEnemies()
-                .Where(enemy => enemy != null && enemy.HasPosition)
-                .Select(enemy => enemy.Position)
-                .ToList();
-
-            // Compute full Voronoi and keep visualization filtering in OnDrawGizmos.
-            _currentVoronoi = _voronoiPartitioning.ComputeVoronoi(transform.localPosition, enemyPositions);
-            _lastVoronoiUpdateStep = currentStep;
         }
 
         /// <summary>
@@ -949,161 +979,212 @@ namespace PacMan.Agent
 
             Vector3 myPos = transform.localPosition;
             UpdateVoronoiData();
-            var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
-            var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
-                                                TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
-            bool isPowered = _agent.IsPoweredUp();
-            bool isScared = _agent.IsScared();
-            float scaredRemaining = Mathf.Max(0f, _agent.GetScaredRemainingDuration());
-            int carriedFood = _agent.GetCarriedFoodCount();
-            Vector3 homeTarget = GetSafestHomePoint();
-            bool holdLaneDueToFoodPile = ShouldHoldDefenderLaneDueToFoodPile(
-                out int protectedLaneFoodCount,
-                out Vector3 protectedFoodCenter,
-                out List<Vector3> protectedFoodPositions);
-
-            bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
-            bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
             
+            // Basic state queries
+            bool isPowered;
+            bool isScared;
+            float scaredRemaining;
+            int carriedFood;
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/BasicState"))
+            {
+                isPowered = _agent.IsPoweredUp();
+                isScared = _agent.IsScared();
+                scaredRemaining = Mathf.Max(0f, _agent.GetScaredRemainingDuration());
+                carriedFood = _agent.GetCarriedFoodCount();
+            }
+
+            // Get assignments
+            var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
+            var activeFood = new List<GameObject>();
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/GetAssignments"))
+            {
+                activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
+                                                    TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
+                bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
+                bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+            }
+
+            // Get home target and food pile info
+            Vector3 homeTarget = Vector3.zero;
+            bool holdLaneDueToFoodPile = false;
+            int protectedLaneFoodCount = 0;
+            Vector3 protectedFoodCenter = Vector3.zero;
+            List<Vector3> protectedFoodPositions = null;
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/GetHomeAndFoodPile"))
+            {
+                homeTarget = GetSafestHomePoint();
+                holdLaneDueToFoodPile = ShouldHoldDefenderLaneDueToFoodPile(
+                    out protectedLaneFoodCount,
+                    out protectedFoodCenter,
+                    out protectedFoodPositions);
+            }
+
             bb.homeTargetPosition = homeTarget;
 
+            // Process scared state
             if (isScared)
             {
-                if (carriedFood >= poweredReturnFoodThreshold || scaredRemaining < 2f)
+                using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/ProcessScared"))
                 {
-                    bb.shouldReturnHome = true;
-                    bb.debugReason = carriedFood >= poweredReturnFoodThreshold
-                        ? "Scared loot threshold reached"
-                        : "Scared ending soon, returning home";
-                }
-                else
-                {
-                    var scaredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
-                    GameObject selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, scaredAssignment?.FoodTarget));
-                    string selectedFoodReason = selectedFoodTarget != null
-                        ? "Scared counter-raid (safest pill)"
-                        : (scaredAssignment?.Reason ?? "Scared counter-raid");
-
-                    if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
+                    if (carriedFood >= poweredReturnFoodThreshold || scaredRemaining < 2f)
                     {
-                        GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
-                        if (alternateFoodTarget != null)
-                        {
-                            selectedFoodTarget = alternateFoodTarget;
-                            RegisterUnsafeFoodRetarget();
-                            selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
-                        }
-                    }
-
-                    if (selectedFoodTarget != null)
-                    {
-                        SetCurrentFoodTarget(selectedFoodTarget);
-                        _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
-                        bb.debugReason = selectedFoodReason;
-                    }
-                    else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
-                    {
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
-                        bb.debugReason = "Scared counter-raid (committed pill)";
-                    }
-                    else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
-                    {
-                        SetCurrentFoodTarget(null);
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
-                        bb.debugReason = "Scared counter-raid fallback";
+                        bb.shouldReturnHome = true;
+                        bb.debugReason = carriedFood >= poweredReturnFoodThreshold
+                            ? "Scared loot threshold reached"
+                            : "Scared ending soon, returning home";
                     }
                     else
                     {
-                        SetCurrentFoodTarget(null);
-                        _lastScaredCounterRaidTargetStep = -99999;
-                        bb.shouldReturnHome = true;
-                        bb.debugReason = "Scared with no enemy pill target";
+                        var scaredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
+                        GameObject selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, scaredAssignment?.FoodTarget));
+                        string selectedFoodReason = selectedFoodTarget != null
+                            ? "Scared counter-raid (safest pill)"
+                            : (scaredAssignment?.Reason ?? "Scared counter-raid");
+
+                        if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
+                        {
+                            GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
+                            if (alternateFoodTarget != null)
+                            {
+                                selectedFoodTarget = alternateFoodTarget;
+                                RegisterUnsafeFoodRetarget();
+                                selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
+                            }
+                        }
+
+                        if (selectedFoodTarget != null)
+                        {
+                            SetCurrentFoodTarget(selectedFoodTarget);
+                            _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
+                            bb.shouldLootWhilePowered = true;
+                            bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
+                            bb.debugReason = selectedFoodReason;
+                        }
+                        else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
+                        {
+                            bb.shouldLootWhilePowered = true;
+                            bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
+                            bb.debugReason = "Scared counter-raid (committed pill)";
+                        }
+                        else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
+                        {
+                            SetCurrentFoodTarget(null);
+                            bb.shouldLootWhilePowered = true;
+                            bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
+                            bb.debugReason = "Scared counter-raid fallback";
+                        }
+                        else
+                        {
+                            SetCurrentFoodTarget(null);
+                            _lastScaredCounterRaidTargetStep = -99999;
+                            bb.shouldReturnHome = true;
+                            bb.debugReason = "Scared with no enemy pill target";
+                        }
                     }
                 }
             }
             else if (isPowered && !holdLaneDueToFoodPile)
             {
-                bb.shouldReturnHome = carriedFood >= poweredReturnFoodThreshold;
+                using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/ProcessPowered"))
+                {
+                    bb.shouldReturnHome = carriedFood >= poweredReturnFoodThreshold;
 
-                var poweredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
-                GameObject poweredFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, poweredAssignment?.FoodTarget));
-                if (!bb.shouldReturnHome && poweredFoodTarget != null)
-                {
-                    SetCurrentFoodTarget(poweredFoodTarget);
-                    bb.shouldLootWhilePowered = true;
-                    bb.enemyPillTargetPosition = poweredFoodTarget.transform.localPosition;
-                    bb.debugReason = "Powered up loot mode";
-                }
-                else if (bb.shouldReturnHome)
-                {
-                    SetCurrentFoodTarget(null);
-                    bb.debugReason = "Powered loot threshold reached";
+                    var poweredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
+                    GameObject poweredFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, poweredAssignment?.FoodTarget));
+                    if (!bb.shouldReturnHome && poweredFoodTarget != null)
+                    {
+                        SetCurrentFoodTarget(poweredFoodTarget);
+                        bb.shouldLootWhilePowered = true;
+                        bb.enemyPillTargetPosition = poweredFoodTarget.transform.localPosition;
+                        bb.debugReason = "Powered up loot mode";
+                    }
+                    else if (bb.shouldReturnHome)
+                    {
+                        SetCurrentFoodTarget(null);
+                        bb.debugReason = "Powered loot threshold reached";
+                    }
                 }
             }
             else if (isPowered && holdLaneDueToFoodPile)
             {
-                SetCurrentFoodTarget(null);
-                bb.debugReason = $"Powered guarding lane pill pile ({protectedLaneFoodCount} pills)";
+                using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/ProcessPoweredFoodPile"))
+                {
+                    SetCurrentFoodTarget(null);
+                    bb.debugReason = $"Powered guarding lane pill pile ({protectedLaneFoodCount} pills)";
+                }
             }
 
-            bool defendAssignmentAllowed =
-                defendAssignment != null &&
-                (!holdLaneDueToFoodPile ||
-                 IsIntruderNearProtectedFoodPile(defendAssignment.TargetPosition, protectedFoodCenter, protectedFoodPositions));
-
-            if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && defendAssignmentAllowed)
+            // Process defense assignment
+            bool defendAssignmentAllowed;
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/ProcessDefenseAssignment"))
             {
-                bb.enemyPacmanIntruderSuspected = true;
-                bb.suspectedIntruderPosition = defendAssignment.TargetPosition;
-                bb.debugReason = defendAssignment.Reason;
-            }
-            else if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && holdLaneDueToFoodPile)
-            {
-                if (string.IsNullOrEmpty(bb.debugReason))
-                    bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
+                defendAssignmentAllowed =
+                    defendAssignment != null &&
+                    (!holdLaneDueToFoodPile ||
+                     IsIntruderNearProtectedFoodPile(defendAssignment.TargetPosition, protectedFoodCenter, protectedFoodPositions));
+
+                if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && defendAssignmentAllowed)
+                {
+                    bb.enemyPacmanIntruderSuspected = true;
+                    bb.suspectedIntruderPosition = defendAssignment.TargetPosition;
+                    bb.debugReason = defendAssignment.Reason;
+                }
+                else if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && holdLaneDueToFoodPile)
+                {
+                    if (string.IsNullOrEmpty(bb.debugReason))
+                        bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
+                }
             }
 
+            // Check mirror lane target
             bb.enemyLikelyCrossingMyLane = false;
             bb.predictedCrossingPoint = Vector3.zero;
-            if (!bb.shouldLootWhilePowered &&
-                !bb.shouldReturnHome &&
-                !isPowered &&
-                !isScared &&
-                !bb.enemyPacmanIntruderSuspected &&
-                TryGetMirrorLaneTarget(out var mirrorTarget, out var mirrorReason))
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckMirrorLane"))
             {
-                bb.enemyLikelyCrossingMyLane = true;
-                bb.predictedCrossingPoint = mirrorTarget;
-                bb.debugReason = mirrorReason;
+                if (!bb.shouldLootWhilePowered &&
+                    !bb.shouldReturnHome &&
+                    !isPowered &&
+                    !isScared &&
+                    !bb.enemyPacmanIntruderSuspected &&
+                    TryGetMirrorLaneTarget(out var mirrorTarget, out var mirrorReason))
+                {
+                    bb.enemyLikelyCrossingMyLane = true;
+                    bb.predictedCrossingPoint = mirrorTarget;
+                    bb.debugReason = mirrorReason;
+                }
             }
 
+            // Check safe middle pills
             bb.safeMiddlePillsAvailable = false;
             bb.safeMiddlePillPosition = Vector3.zero;
-            if (!bb.shouldLootWhilePowered &&
-                !bb.shouldReturnHome &&
-                !bb.enemyPacmanIntruderSuspected &&
-                !bb.enemyLikelyCrossingMyLane &&
-                (!isPowered || !holdLaneDueToFoodPile) &&
-                TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckSafeMiddlePills"))
             {
-                bb.safeMiddlePillsAvailable = true;
-                bb.safeMiddlePillPosition = safeMiddleTarget;
-                bb.debugReason = safeMiddleReason;
+                if (!bb.shouldLootWhilePowered &&
+                    !bb.shouldReturnHome &&
+                    !bb.enemyPacmanIntruderSuspected &&
+                    !bb.enemyLikelyCrossingMyLane &&
+                    (!isPowered || !holdLaneDueToFoodPile) &&
+                    TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
+                {
+                    bb.safeMiddlePillsAvailable = true;
+                    bb.safeMiddlePillPosition = safeMiddleTarget;
+                    bb.debugReason = safeMiddleReason;
+                }
             }
 
-            bb.formationPoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
-            bb.dropZonePoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
+            // Finalize blackboard
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/Finalize"))
+            {
+                bb.formationPoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
+                bb.dropZonePoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
 
-            bb.outsideDefensiveZone =
-                _hasDefenseAnchor &&
-                Vector3.Distance(myPos, _defenseAnchor) > 1.25f;
+                bb.outsideDefensiveZone =
+                    _hasDefenseAnchor &&
+                    Vector3.Distance(myPos, _defenseAnchor) > 1.25f;
 
-            if (string.IsNullOrEmpty(bb.debugReason))
-                bb.debugReason = "Default defend state";
+                if (string.IsNullOrEmpty(bb.debugReason))
+                    bb.debugReason = "Default defend state";
+            }
 
             return bb;
         }
@@ -1111,275 +1192,332 @@ namespace PacMan.Agent
         {
             AttackerBlackboard bb = new AttackerBlackboard();
 
-             Vector3 myPos = transform.localPosition;
-             UpdateVoronoiData();
-             var trackedEnemies = GetTrackedEnemies();
-             var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
-                                                 TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
-             var activeEnemyCapsules = GetActiveEnemyCapsules();
-             float timeRemaining = _agent.GetTimeRemaining();
-             bool isPowered = _agent.IsPoweredUp();
-             int carriedFoodCount = _agent.GetCarriedFoodCount();
-             
-             // Calculate power capsule rush decision early so it can override late-game return home
-             Vector3 capsuleTarget = Vector3.zero;
-             bool shouldRushPowerCapsule =
-                 !isPowered &&
-                   timeRemaining <= _cachedCapsuleRushTimeThreshold &&
-                 TryGetClosestObjectPosition(myPos, activeEnemyCapsules, out capsuleTarget) &&
-                 CanReachCapsuleWithBufferTime(myPos, capsuleTarget, timeRemaining);
-             
-             bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
-             bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+            Vector3 myPos = transform.localPosition;
+            UpdateVoronoiData();
+            
+            // Basic state queries  
+            var trackedEnemies = GetTrackedEnemies();
+            var activeFood = new List<GameObject>();
+            var activeEnemyCapsules = new List<GameObject>();
+            float timeRemaining = 0f;
+            bool isPowered = false;
+            int carriedFoodCount = 0;
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/BasicState"))
+            {
+                activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
+                                                    TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
+                activeEnemyCapsules = GetActiveEnemyCapsules();
+                timeRemaining = _agent.GetTimeRemaining();
+                isPowered = _agent.IsPoweredUp();
+                carriedFoodCount = _agent.GetCarriedFoodCount();
+            }
 
-             
-             // Don't return home due to time if we should rush the power capsule instead
-             bool shouldReturnHomeLateGame;
-             bool canReachHomeInTime = true;  // Default to true if we're rushing capsule
-             if (shouldRushPowerCapsule)
-             {
-                 shouldReturnHomeLateGame = false;
-             }
-             else
-             {
-                 shouldReturnHomeLateGame = ShouldReturnHomeLateGame(myPos, carriedFoodCount, timeRemaining, out canReachHomeInTime);
-             }
+            // Calculate power capsule decisions
+            Vector3 capsuleTarget = Vector3.zero;
+            bool shouldRushPowerCapsule = false;
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/CapsuleDecision"))
+            {
+                shouldRushPowerCapsule =
+                    !isPowered &&
+                    timeRemaining <= _cachedCapsuleRushTimeThreshold &&
+                    TryGetClosestObjectPosition(myPos, activeEnemyCapsules, out capsuleTarget) &&
+                    CanReachCapsuleWithBufferTime(myPos, capsuleTarget, timeRemaining);
+                
+                bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
+                bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+            }
 
+            // Determine late-game return home
+            bool shouldReturnHomeLateGame = false;
+            bool canReachHomeInTime = true;
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/LateGameDecision"))
+            {
+                if (shouldRushPowerCapsule)
+                {
+                    shouldReturnHomeLateGame = false;
+                }
+                else
+                {
+                    shouldReturnHomeLateGame = ShouldReturnHomeLateGame(myPos, carriedFoodCount, timeRemaining, out canReachHomeInTime);
+                }
+            }
+
+            // Determine if carrying food (used in multiple places)
+            bool carryingFood = carriedFoodCount >= 1;
+            
+            // Track closest enemy and calculate ghost danger
             float closestEnemyDist = float.MaxValue;
             TrackedEnemyInfo closestEnemy = null;
-
-            if (trackedEnemies != null)
+            bool ghostInsideEnterRange = false;
+            bool ghostInsideExitRange = false;
+            bool _attackerThreatRetreatActiveLocal = _attackerThreatRetreatActive;
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/EnemyTracking"))
             {
-                foreach (var enemy in trackedEnemies)
+                if (trackedEnemies != null)
                 {
-                    if (enemy == null || !enemy.HasPosition)
-                        continue;
-
-                    float dist = Vector3.Distance(myPos, enemy.Position);
-                    if (dist < closestEnemyDist)
+                    foreach (var enemy in trackedEnemies)
                     {
-                        closestEnemyDist = dist;
-                        closestEnemy = enemy;
+                        if (enemy == null || !enemy.HasPosition)
+                            continue;
+
+                        float dist = Vector3.Distance(myPos, enemy.Position);
+                        if (dist < closestEnemyDist)
+                        {
+                            closestEnemyDist = dist;
+                            closestEnemy = enemy;
+                        }
+                    }
+                }
+
+                int dangerStartFood = Mathf.Max(0, attackerGhostDangerStartFoodThreshold);
+                const int dangerMaxFood = 8;
+                float dangerProgress =
+                    carriedFoodCount <= dangerStartFood
+                        ? 0f
+                        : Mathf.Clamp01((carriedFoodCount - dangerStartFood) / (float)Mathf.Max(1, dangerMaxFood - dangerStartFood));
+
+                float ghostDangerDistance = carriedFoodCount < dangerStartFood
+                    ? 0f
+                    : Mathf.Lerp(
+                        baseGhostDangerDistance,
+                        maxGhostDangerDistance,
+                        dangerProgress);
+
+                ghostInsideEnterRange = closestEnemy != null && closestEnemyDist < ghostDangerDistance;
+                ghostInsideExitRange = closestEnemy != null && closestEnemyDist < (ghostDangerDistance + ghostDangerHysteresisDistance);
+                
+                if (isPowered || !carryingFood)
+                {
+                    _attackerThreatRetreatActiveLocal = false;
+                }
+                else if (!_attackerThreatRetreatActiveLocal)
+                {
+                    _attackerThreatRetreatActiveLocal = ghostInsideEnterRange;
+                }
+                else
+                {
+                    bool reachedSafeAttackAnchor =
+                        _hasAttackAnchor &&
+                        IsInOwnTerritory(myPos) &&
+                        Vector3.Distance(myPos, _attackAnchor) <= 0.75f;
+
+                    _attackerThreatRetreatActiveLocal = !reachedSafeAttackAnchor && ghostInsideExitRange;
+                }
+                
+                _attackerThreatRetreatActive = _attackerThreatRetreatActiveLocal;
+            }
+
+            // Process food targets
+            var attackAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: isPowered);
+            var capsuleCampAssignment = RoleAssigner.Instance?.AttackManager?.GetCapsuleCampAssignment(this, activeEnemyCapsules);
+            var capsuleRushAssignment = RoleAssigner.Instance?.AttackManager?.GetCapsuleRushAssignment(this, activeEnemyCapsules);
+            GameObject selectedFoodTarget = null;
+            string selectedFoodReason = "";
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/FoodSelection"))
+            {
+                selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, attackAssignment?.FoodTarget));
+                selectedFoodReason = selectedFoodTarget != null
+                    ? "Safest enemy pill selected"
+                    : (attackAssignment?.Reason ?? "Safe enemy pill available");
+
+                if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
+                {
+                    GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
+                    if (alternateFoodTarget != null)
+                    {
+                        selectedFoodTarget = alternateFoodTarget;
+                        RegisterUnsafeFoodRetarget();
+                        selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
                     }
                 }
             }
 
-            int dangerStartFood = Mathf.Max(0, attackerGhostDangerStartFoodThreshold);
-            const int dangerMaxFood = 8;
-            float dangerProgress =
-                carriedFoodCount <= dangerStartFood
-                    ? 0f
-                    : Mathf.Clamp01((carriedFoodCount - dangerStartFood) / (float)Mathf.Max(1, dangerMaxFood - dangerStartFood));
-
-            float ghostDangerDistance = carriedFoodCount < dangerStartFood
-                ? 0f
-                : Mathf.Lerp(
-                    baseGhostDangerDistance,
-                    maxGhostDangerDistance,
-                    dangerProgress);
-
-            bool carryingFood = carriedFoodCount >= 1;
+            // Determine return home logic
+            bool ghostNearby = _attackerThreatRetreatActive;
             bool lateGameBankUnreachable = carryingFood && !canReachHomeInTime;
-            bool ghostInsideEnterRange = closestEnemy != null && closestEnemyDist < ghostDangerDistance;
-            bool ghostInsideExitRange = closestEnemy != null && closestEnemyDist < (ghostDangerDistance + ghostDangerHysteresisDistance);
-            if (isPowered || !carryingFood)
-            {
-                _attackerThreatRetreatActive = false;
-            }
-            else if (!_attackerThreatRetreatActive)
-            {
-                _attackerThreatRetreatActive = ghostInsideEnterRange;
-            }
-            else
-            {
-                bool reachedSafeAttackAnchor =
-                    _hasAttackAnchor &&
-                    IsInOwnTerritory(myPos) &&
-                    Vector3.Distance(myPos, _attackAnchor) <= 0.75f;
-
-                _attackerThreatRetreatActive = !reachedSafeAttackAnchor && ghostInsideExitRange;
-            }
-
-             bool ghostNearby = _attackerThreatRetreatActive;
- 
-             bool returnHomeReleasedDeepInsideOwnSide =
-                 carriedFoodCount == 0 &&
-                 IsDeepEnoughInOwnTerritory(myPos, returnHomeReleaseOwnSideDistance);
-
+            bool returnHomeReleasedDeepInsideOwnSide = carriedFoodCount == 0 && IsDeepEnoughInOwnTerritory(myPos, returnHomeReleaseOwnSideDistance);
+            
             if (shouldRushPowerCapsule)
             {
                 _attackerThreatRetreatActive = false;
                 _attackerRegroupAfterReturnHome = false;
                 ghostNearby = false;
             }
-
-            var attackAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: isPowered);
-            var capsuleCampAssignment = RoleAssigner.Instance?.AttackManager?.GetCapsuleCampAssignment(this, activeEnemyCapsules);
-            var capsuleRushAssignment = RoleAssigner.Instance?.AttackManager?.GetCapsuleRushAssignment(this, activeEnemyCapsules);
-            bool hasPoweredCapsuleAssignment = isPowered && capsuleCampAssignment?.CapsuleTarget != null;
-
-            bool shouldCommitReturnHome =
-                (!shouldRushPowerCapsule && !isPowered && carriedFoodCount >= attackerForcedReturnFoodThreshold) ||
-                (!shouldRushPowerCapsule && carryingFood && !isPowered && ghostInsideEnterRange) ||
-                (isPowered && !hasPoweredCapsuleAssignment && carriedFoodCount >= poweredReturnFoodThreshold);
-
-            bool shouldReturnHomeNow =
-                _attackerRegroupAfterReturnHome ||
-                shouldCommitReturnHome ||
-                (!isPowered && ghostNearby) ||
-                shouldReturnHomeLateGame;
-            Vector3 homeTarget = GetStableHomeTarget(shouldReturnHomeNow);
-            bool reachedHomeReturnTarget =
-                carriedFoodCount == 0 &&
-                IsInOwnTerritory(myPos) &&
-                Vector3.Distance(myPos, homeTarget) <= 0.45f;
-
-            if (shouldCommitReturnHome)
+            
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/ReturnHomeLogic"))
             {
-                _attackerRegroupAfterReturnHome = true;
-            }
-            else if (_attackerRegroupAfterReturnHome &&
-                     (reachedHomeReturnTarget || returnHomeReleasedDeepInsideOwnSide))
-            {
-                _attackerRegroupAfterReturnHome = false;
-            }
+                bool hasPoweredCapsuleAssignment = isPowered && capsuleCampAssignment?.CapsuleTarget != null;
 
-            bb.shouldReturnHome =
-                _attackerRegroupAfterReturnHome ||
-                (!isPowered && ghostNearby) ||
-                shouldReturnHomeLateGame;
-            bb.shouldReturnHomeLateGame = shouldReturnHomeLateGame;
-            if (!bb.shouldReturnHome)
-            {
-                _hasLatchedHomeTarget = false;
-                _lastHomeTargetRefreshStep = -99999;
-            }
+                bool shouldCommitReturnHome =
+                    (!shouldRushPowerCapsule && !isPowered && carriedFoodCount >= attackerForcedReturnFoodThreshold) ||
+                    (!shouldRushPowerCapsule && carryingFood && !isPowered && ghostInsideEnterRange) ||
+                    (isPowered && !hasPoweredCapsuleAssignment && carriedFoodCount >= poweredReturnFoodThreshold);
 
-            bb.homeTargetPosition = homeTarget;
-            GameObject selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, attackAssignment?.FoodTarget));
-            string selectedFoodReason = selectedFoodTarget != null
-                ? "Safest enemy pill selected"
-                : (attackAssignment?.Reason ?? "Safe enemy pill available");
+                bool shouldReturnHomeNow =
+                    _attackerRegroupAfterReturnHome ||
+                    shouldCommitReturnHome ||
+                    (!isPowered && ghostNearby) ||
+                    shouldReturnHomeLateGame;
+                    
+                Vector3 homeTarget = GetStableHomeTarget(shouldReturnHomeNow);
+                bool reachedHomeReturnTarget =
+                    carriedFoodCount == 0 &&
+                    IsInOwnTerritory(myPos) &&
+                    Vector3.Distance(myPos, homeTarget) <= 0.45f;
 
-            if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
-            {
-                GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
-                if (alternateFoodTarget != null)
+                if (shouldCommitReturnHome)
                 {
-                    selectedFoodTarget = alternateFoodTarget;
-                    RegisterUnsafeFoodRetarget();
-                    selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
+                    _attackerRegroupAfterReturnHome = true;
                 }
-            }
-
-            SetCurrentFoodTarget(selectedFoodTarget);
-            if (bb.shouldReturnHome)
-                SetCurrentFoodTarget(null);
-
-            if (shouldRushPowerCapsule)
-            {
-                SetCurrentFoodTarget(null);
-                bb.shouldReturnHome = false;
-                bb.shouldGrabPowerCapsule = true;
-                bb.powerCapsuleTargetPosition =
-                    capsuleRushAssignment?.CapsuleTarget != null
-                        ? capsuleRushAssignment.CapsuleTarget.transform.localPosition
-                        : capsuleTarget;
-            }
-
-            if (isPowered)
-            {
-                if (hasPoweredCapsuleAssignment && !_agent.IsPoweredUp())
-                {
-                    bb.shouldGrabPowerCapsule = true;
-                    bb.powerCapsuleTargetPosition = capsuleCampAssignment.CapsuleTarget.transform.localPosition;
-                }
-                else if (hasPoweredCapsuleAssignment)
-                {
-                    bb.shouldCampNextPowerCapsule = true;
-                    bb.powerCapsuleCampPosition = GetCapsuleCampPoint(capsuleCampAssignment.CapsuleTarget.transform.localPosition);
-                }
-                else
-                {
-                    bb.shouldReturnHome = carriedFoodCount >= poweredReturnFoodThreshold;
-                    bb.shouldLootWhilePowered = selectedFoodTarget != null;
-
-                    if (bb.shouldLootWhilePowered)
-                    {
-                        bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
-                    }
-                    else if (!bb.shouldReturnHome &&
-                             TryGetSafestFoodPosition(myPos, activeFood, out var fallbackPoweredFoodTarget))
-                    {
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = fallbackPoweredFoodTarget;
-                    }
-                }
-            }
-
-            if (!bb.shouldLootWhilePowered &&
-                selectedFoodTarget != null &&
-                (isPowered || !ghostNearby))
-            {
-                bb.safeEnemyPillsAvailable = true;
-                bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
-            }
-
-            bb.safeMiddlePillsAvailable = false;
-            bb.middlePillTargetPosition = Vector3.zero;
-
-            Vector3 attackAnchor = _hasAttackAnchor ? _attackAnchor : myPos;
-            bb.attackPositionTarget = attackAnchor;
-            bb.patrolTargetPosition = GetAttackPatrolPoint(attackAnchor);
-
-            bb.outsideAttackZone =
-                _hasAttackAnchor &&
-                Vector3.Distance(myPos, _attackAnchor) > 1.5f;
-
-            if (_attackerRegroupAfterReturnHome)
-            {
-                bool regroupComplete =
-                    reachedHomeReturnTarget || returnHomeReleasedDeepInsideOwnSide;
-
-                if (regroupComplete)
+                else if (_attackerRegroupAfterReturnHome &&
+                         (reachedHomeReturnTarget || returnHomeReleasedDeepInsideOwnSide))
                 {
                     _attackerRegroupAfterReturnHome = false;
                 }
-                else
+
+                bb.shouldReturnHome =
+                    _attackerRegroupAfterReturnHome ||
+                    (!isPowered && ghostNearby) ||
+                    shouldReturnHomeLateGame;
+                bb.shouldReturnHomeLateGame = shouldReturnHomeLateGame;
+                if (!bb.shouldReturnHome)
                 {
-                    bb.shouldGrabPowerCapsule = false;
-                    bb.shouldCampNextPowerCapsule = false;
-                    bb.shouldLootWhilePowered = false;
-                    bb.safeEnemyPillsAvailable = false;
-                    bb.shouldReturnHome = true;
-                    bb.debugReason = "Finish return-home path";
+                    _hasLatchedHomeTarget = false;
+                    _lastHomeTargetRefreshStep = -99999;
+                }
+
+                bb.homeTargetPosition = homeTarget;
+            }
+
+            // Handle capsule logic
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/CapsuleLogic"))
+            {
+                SetCurrentFoodTarget(selectedFoodTarget);
+                if (bb.shouldReturnHome)
+                    SetCurrentFoodTarget(null);
+
+                if (shouldRushPowerCapsule)
+                {
+                    SetCurrentFoodTarget(null);
+                    bb.shouldReturnHome = false;
+                    bb.shouldGrabPowerCapsule = true;
+                    bb.powerCapsuleTargetPosition =
+                        capsuleRushAssignment?.CapsuleTarget != null
+                            ? capsuleRushAssignment.CapsuleTarget.transform.localPosition
+                            : capsuleTarget;
+                }
+
+                bool hasPoweredCapsuleAssignment = isPowered && capsuleCampAssignment?.CapsuleTarget != null;
+                if (isPowered)
+                {
+                    if (hasPoweredCapsuleAssignment && !_agent.IsPoweredUp())
+                    {
+                        bb.shouldGrabPowerCapsule = true;
+                        bb.powerCapsuleTargetPosition = capsuleCampAssignment.CapsuleTarget.transform.localPosition;
+                    }
+                    else if (hasPoweredCapsuleAssignment)
+                    {
+                        bb.shouldCampNextPowerCapsule = true;
+                        bb.powerCapsuleCampPosition = GetCapsuleCampPoint(capsuleCampAssignment.CapsuleTarget.transform.localPosition);
+                    }
+                    else
+                    {
+                        bb.shouldReturnHome = carriedFoodCount >= poweredReturnFoodThreshold;
+                        bb.shouldLootWhilePowered = selectedFoodTarget != null;
+
+                        if (bb.shouldLootWhilePowered)
+                        {
+                            bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
+                        }
+                        else if (!bb.shouldReturnHome &&
+                                 TryGetSafestFoodPosition(myPos, activeFood, out var fallbackPoweredFoodTarget))
+                        {
+                            bb.shouldLootWhilePowered = true;
+                            bb.enemyPillTargetPosition = fallbackPoweredFoodTarget;
+                        }
+                    }
+                }
+
+                if (!bb.shouldLootWhilePowered &&
+                    selectedFoodTarget != null &&
+                    (isPowered || !ghostNearby))
+                {
+                    bb.safeEnemyPillsAvailable = true;
+                    bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
                 }
             }
 
-            if (_attackerRegroupAfterReturnHome)
-                bb.debugReason = "Finish return-home path";
-            else if (bb.shouldReturnHomeLateGame)
-                bb.debugReason = $"Late game return home (time left {timeRemaining:F1}s)";
-            else if (lateGameBankUnreachable)
-                bb.debugReason = "Too late to bank food, keep pressuring";
-            else if (bb.shouldGrabPowerCapsule)
-                bb.debugReason = capsuleRushAssignment?.Reason ?? "Late game power capsule rush";
-            else if (bb.shouldCampNextPowerCapsule)
-                bb.debugReason = capsuleCampAssignment?.Reason ?? "Camp next enemy power capsule";
-            else if (bb.shouldReturnHome && isPowered)
-                bb.debugReason = "Powered loot threshold reached";
-            else if (bb.shouldReturnHome && !isPowered && carriedFoodCount >= attackerForcedReturnFoodThreshold)
-                bb.debugReason = "Forced return at high loot count";
-            else if (bb.shouldLootWhilePowered)
-                bb.debugReason = "Powered up loot mode";
-            else if (bb.shouldReturnHome)
-                bb.debugReason = $"Threat nearby while carrying food (danger radius {ghostDangerDistance:F1})";
-            else if (bb.safeEnemyPillsAvailable)
-                bb.debugReason = selectedFoodReason;
-            else if (bb.outsideAttackZone)
-                bb.debugReason = "Outside attack zone";
-            else
-                bb.debugReason = "Patrol attack zone";
+            // Setup position targets
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/PositionTargets"))
+            {
+                bb.safeMiddlePillsAvailable = false;
+                bb.middlePillTargetPosition = Vector3.zero;
+
+                Vector3 attackAnchor = _hasAttackAnchor ? _attackAnchor : myPos;
+                bb.attackPositionTarget = attackAnchor;
+                bb.patrolTargetPosition = GetAttackPatrolPoint(attackAnchor);
+
+                bb.outsideAttackZone =
+                    _hasAttackAnchor &&
+                    Vector3.Distance(myPos, _attackAnchor) > 1.5f;
+            }
+
+            // Finalize debug reason
+            using (DebugManager.BeginTimingScope("AI/Decision/AttackerBlackboard/Finalize"))
+            {
+                if (_attackerRegroupAfterReturnHome)
+                {
+                    bool regroupComplete =
+                        (carriedFoodCount == 0 && IsInOwnTerritory(myPos) && Vector3.Distance(myPos, bb.homeTargetPosition) <= 0.45f) || 
+                        returnHomeReleasedDeepInsideOwnSide;
+
+                    if (regroupComplete)
+                    {
+                        _attackerRegroupAfterReturnHome = false;
+                    }
+                    else
+                    {
+                        bb.shouldGrabPowerCapsule = false;
+                        bb.shouldCampNextPowerCapsule = false;
+                        bb.shouldLootWhilePowered = false;
+                        bb.safeEnemyPillsAvailable = false;
+                        bb.shouldReturnHome = true;
+                        bb.debugReason = "Finish return-home path";
+                    }
+                }
+
+                if (_attackerRegroupAfterReturnHome)
+                    bb.debugReason = "Finish return-home path";
+                else if (bb.shouldReturnHomeLateGame)
+                    bb.debugReason = $"Late game return home (time left {timeRemaining:F1}s)";
+                else if (lateGameBankUnreachable)
+                    bb.debugReason = "Too late to bank food, keep pressuring";
+                else if (bb.shouldGrabPowerCapsule)
+                    bb.debugReason = capsuleRushAssignment?.Reason ?? "Late game power capsule rush";
+                else if (bb.shouldCampNextPowerCapsule)
+                    bb.debugReason = capsuleCampAssignment?.Reason ?? "Camp next enemy power capsule";
+                else if (bb.shouldReturnHome && isPowered)
+                    bb.debugReason = "Powered loot threshold reached";
+                else if (bb.shouldReturnHome && !isPowered && carriedFoodCount >= attackerForcedReturnFoodThreshold)
+                    bb.debugReason = "Forced return at high loot count";
+                else if (bb.shouldLootWhilePowered)
+                    bb.debugReason = "Powered up loot mode";
+                else if (bb.shouldReturnHome)
+                {
+                    float ghostDangerDistance = carriedFoodCount < Mathf.Max(0, attackerGhostDangerStartFoodThreshold)
+                        ? 0f
+                        : Mathf.Lerp(baseGhostDangerDistance, maxGhostDangerDistance, 
+                            Mathf.Clamp01((float)(carriedFoodCount - attackerGhostDangerStartFoodThreshold) / 
+                            Mathf.Max(1, 8 - attackerGhostDangerStartFoodThreshold)));
+                    bb.debugReason = $"Threat nearby while carrying food (danger radius {ghostDangerDistance:F1})";
+                }
+                else if (bb.safeEnemyPillsAvailable)
+                    bb.debugReason = selectedFoodReason;
+                else if (bb.outsideAttackZone)
+                    bb.debugReason = "Outside attack zone";
+                else
+                    bb.debugReason = "Patrol attack zone";
+            }
 
             return bb;
         }

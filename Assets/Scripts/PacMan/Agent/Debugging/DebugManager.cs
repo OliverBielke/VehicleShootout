@@ -185,12 +185,19 @@ namespace PacMan.Agent.Debugging
                 normal = { textColor = Color.white }
             };
 
-            GUILayout.BeginArea(new Rect(12f, 12f, 520f, 260f), GUI.skin.box);
+            var overlayWidth = 560f;
+            var overlayHeight = 320f;
+            GUILayout.BeginArea(new Rect(Screen.width - overlayWidth - 12f, 12f, overlayWidth, overlayHeight), GUI.skin.box);
             GUILayout.Label(snapshot.IsLive ? "Timing summary (live)" : "Timing summary (frozen)", headerStyle);
-            GUILayout.Label($"Run {snapshot.RunElapsedSeconds:0.0}s | sim {snapshot.SimulationTimeSeconds:0.0}s", rowStyle);
+            GUILayout.Label($"Run {snapshot.RunElapsedSeconds:0.0}s | sim {snapshot.SimulationTimeSeconds:0.0}s | total {snapshot.TotalObservedMilliseconds:0.0} ms", rowStyle);
 
-            var sections = snapshot.Sections.OrderByDescending(section => section.TotalMilliseconds).Take(6).ToArray();
+            var sections = snapshot.Sections
+                .Where(section => !string.Equals(section.Name, "Total", StringComparison.Ordinal))
+                .OrderByDescending(section => section.TotalMilliseconds)
+                .Take(6)
+                .ToArray();
             var maxTotalMs = Mathf.Max(0.0001f, sections.Max(section => (float)section.TotalMilliseconds));
+            var maxDisplayedMs = Mathf.Max(maxTotalMs, (float)snapshot.UntrackedMilliseconds);
 
             foreach (var section in sections)
             {
@@ -199,13 +206,36 @@ namespace PacMan.Agent.Debugging
                 var barRect = GUILayoutUtility.GetRect(180f, 14f);
                 GUI.Box(barRect, GUIContent.none);
 
-                var fillWidth = Mathf.Clamp((float)(section.TotalMilliseconds / maxTotalMs) * barRect.width, 2f, barRect.width);
+                var fillWidth = Mathf.Clamp((float)(section.TotalMilliseconds / maxDisplayedMs) * barRect.width, 2f, barRect.width);
                 var previousColor = GUI.color;
                 GUI.color = new Color(0.35f, 0.75f, 1f, 0.9f);
                 GUI.Box(new Rect(barRect.x, barRect.y, fillWidth, barRect.height), GUIContent.none);
                 GUI.color = previousColor;
 
-                GUILayout.Label($"{section.TotalMilliseconds:0.00} ms", rowStyle, GUILayout.Width(85f));
+                var sectionPercent = snapshot.TotalObservedMilliseconds <= 0.0
+                    ? 0.0
+                    : section.TotalMilliseconds / snapshot.TotalObservedMilliseconds * 100.0;
+                GUILayout.Label($"{section.TotalMilliseconds:0.00} ms ({sectionPercent:0.0}%)", rowStyle, GUILayout.Width(110f));
+                GUILayout.EndHorizontal();
+            }
+
+            if (snapshot.UntrackedMilliseconds > 0.0)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Untracked", rowStyle, GUILayout.Width(110f));
+                var barRect = GUILayoutUtility.GetRect(180f, 14f);
+                GUI.Box(barRect, GUIContent.none);
+
+                var fillWidth = Mathf.Clamp((float)(snapshot.UntrackedMilliseconds / maxDisplayedMs) * barRect.width, 2f, barRect.width);
+                var previousColor = GUI.color;
+                GUI.color = new Color(1f, 0.55f, 0.25f, 0.95f);
+                GUI.Box(new Rect(barRect.x, barRect.y, fillWidth, barRect.height), GUIContent.none);
+                GUI.color = previousColor;
+
+                var untrackedPercent = snapshot.TotalObservedMilliseconds <= 0.0
+                    ? 0.0
+                    : snapshot.UntrackedMilliseconds / snapshot.TotalObservedMilliseconds * 100.0;
+                GUILayout.Label($"{snapshot.UntrackedMilliseconds:0.00} ms ({untrackedPercent:0.0}%)", rowStyle, GUILayout.Width(110f));
                 GUILayout.EndHorizontal();
             }
 

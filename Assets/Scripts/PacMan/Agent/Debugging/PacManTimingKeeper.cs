@@ -12,6 +12,8 @@ namespace PacMan.Agent.Debugging
     /// </summary>
     public sealed class PacManTimingKeeper
     {
+        private const string TickTotalSectionName = "Total";
+
         private readonly Dictionary<string, TimingAggregate> _aggregates = new();
         private readonly object _lock = new();
         private float _runStartRealtime;
@@ -196,19 +198,56 @@ namespace PacMan.Agent.Debugging
                 ? _simulationTimeSeconds
                 : Time.realtimeSinceStartup - _runStartRealtime;
 
+            var runElapsedSeconds = Time.realtimeSinceStartup - _runStartRealtime;
+
             var sections = _aggregates.Values
                 .Select(aggregate => aggregate.ToSnapshot())
                 .OrderByDescending(section => section.TotalMilliseconds)
                 .ThenBy(section => section.Name)
                 .ToArray();
 
+            var totalRunMilliseconds = Math.Max(0.0, runElapsedSeconds * 1000.0);
+            var totalTickMilliseconds = ResolveTotalTickMilliseconds(sections);
+            var totalTrackedMilliseconds = ResolveTrackedMilliseconds(sections);
+
             return new TimingSnapshot(
                 reason,
-                Time.realtimeSinceStartup - _runStartRealtime,
+                runElapsedSeconds,
                 simulationTimeSeconds,
                 sections,
                 _sessionActive,
-                Time.realtimeSinceStartup);
+                Time.realtimeSinceStartup,
+                totalTrackedMilliseconds,
+                totalRunMilliseconds,
+                totalTickMilliseconds);
+        }
+
+        private static double ResolveTotalTickMilliseconds(TimingSectionSnapshot[] sections)
+        {
+            if (sections == null || sections.Length == 0)
+            {
+                return 0.0;
+            }
+
+            var totalTickSection = sections.FirstOrDefault(section => string.Equals(section.Name, TickTotalSectionName, StringComparison.Ordinal));
+            if (!string.IsNullOrEmpty(totalTickSection.Name))
+            {
+                return Math.Max(0.0, totalTickSection.TotalMilliseconds);
+            }
+
+            return Math.Max(0.0, sections.Max(section => section.TotalMilliseconds));
+        }
+
+        private static double ResolveTrackedMilliseconds(TimingSectionSnapshot[] sections)
+        {
+            if (sections == null || sections.Length == 0)
+            {
+                return 0.0;
+            }
+
+            return Math.Max(0.0, sections
+                .Where(section => !string.Equals(section.Name, TickTotalSectionName, StringComparison.Ordinal))
+                .Sum(section => section.TotalMilliseconds));
         }
 
         /// <summary>
@@ -302,10 +341,12 @@ namespace PacMan.Agent.Debugging
     /// </summary>
     public sealed class TimingSnapshot
     {
+        private const string TickTotalSectionName = "Total";
+
         /// <summary>
         /// Gets an empty snapshot with no collected samples.
         /// </summary>
-        public static readonly TimingSnapshot Empty = new TimingSnapshot(null, 0f, 0f, Array.Empty<TimingSectionSnapshot>(), false, 0f);
+        public static readonly TimingSnapshot Empty = new TimingSnapshot(null, 0f, 0f, Array.Empty<TimingSectionSnapshot>(), false, 0f, 0.0, 0.0, 0.0);
 
         /// <summary>
         /// Creates a snapshot from aggregate timing data.
@@ -316,7 +357,10 @@ namespace PacMan.Agent.Debugging
         /// <param name="sections">The collected timing sections.</param>
         /// <param name="isLive">Whether the snapshot is still live or has been frozen.</param>
         /// <param name="snapshotRealtime">The real time when the snapshot was taken.</param>
-        public TimingSnapshot(string reason, float runElapsedSeconds, float simulationTimeSeconds, TimingSectionSnapshot[] sections, bool isLive, float snapshotRealtime)
+        /// <param name="totalTrackedMilliseconds">The total accumulated milliseconds across all sections.</param>
+        /// <param name="totalRunMilliseconds">The total elapsed time in milliseconds since the session began.</param>
+        /// <param name="totalObservedMilliseconds">The total tick time in milliseconds used as the denominator for percentages.</param>
+        public TimingSnapshot(string reason, float runElapsedSeconds, float simulationTimeSeconds, TimingSectionSnapshot[] sections, bool isLive, float snapshotRealtime, double totalTrackedMilliseconds, double totalRunMilliseconds, double totalObservedMilliseconds)
         {
             Reason = reason;
             RunElapsedSeconds = runElapsedSeconds;
@@ -324,6 +368,9 @@ namespace PacMan.Agent.Debugging
             Sections = sections ?? Array.Empty<TimingSectionSnapshot>();
             IsLive = isLive;
             SnapshotRealtime = snapshotRealtime;
+            TotalTrackedMilliseconds = Math.Max(0.0, totalTrackedMilliseconds);
+            TotalRunMilliseconds = Math.Max(0.0, totalRunMilliseconds);
+            TotalObservedMilliseconds = Math.Max(0.0, totalObservedMilliseconds);
         }
 
         /// <summary>Gets the optional context string stored with the snapshot.</summary>
@@ -344,6 +391,18 @@ namespace PacMan.Agent.Debugging
         /// <summary>Gets the real-time timestamp when the snapshot was created.</summary>
         public float SnapshotRealtime { get; }
 
+        /// <summary>Gets the total accumulated duration across all tracked sections in milliseconds.</summary>
+        public double TotalTrackedMilliseconds { get; }
+
+        /// <summary>Gets the total elapsed run time in milliseconds.</summary>
+        public double TotalRunMilliseconds { get; }
+
+        /// <summary>Gets the total tick time in milliseconds used for section and untracked percentages.</summary>
+        public double TotalObservedMilliseconds { get; }
+
+        /// <summary>Gets the portion of total tick time that was not attributed to tracked sections.</summary>
+        public double UntrackedMilliseconds => Math.Max(0.0, TotalObservedMilliseconds - TotalTrackedMilliseconds);
+
         /// <summary>
         /// Gets a value indicating whether the snapshot contains at least one timing section.
         /// </summary>
@@ -356,14 +415,15 @@ namespace PacMan.Agent.Debugging
         /// <returns>A formatted summary string.</returns>
         public string BuildCompactSummary(int maxSections)
         {
-            if (!HasData)
+            var displaySections = GetDisplaySections();
+            if (displaySections.Length == 0)
             {
                 var emptyState = IsLive ? "live" : "frozen";
-                return $"{emptyState} | no samples yet{BuildMetadataSuffix()}";
+                return $"{emptyState}{BuildMetadataSuffix()} | total={TotalObservedMilliseconds:0.0}ms | tracked={TotalTrackedMilliseconds:0.0}ms | untracked={UntrackedMilliseconds:0.0}ms ({GetPercentage(UntrackedMilliseconds):0.0}%) | no samples yet";
             }
 
             var builder = new StringBuilder();
-            var count = Mathf.Clamp(maxSections, 1, Sections.Length);
+            var count = Mathf.Clamp(maxSections, 1, displaySections.Length);
             for (var i = 0; i < count; i++)
             {
                 if (i > 0)
@@ -371,18 +431,39 @@ namespace PacMan.Agent.Debugging
                     builder.Append(" | ");
                 }
 
-                var section = Sections[i];
-                builder.Append(section.Name)
-                    .Append(' ')
-                    .Append(section.TotalMilliseconds.ToString("0.0"))
-                    .Append("ms x")
-                    .Append(section.SampleCount)
-                    .Append(" (max ")
-                    .Append(section.MaxMilliseconds.ToString("0.0"))
-                    .Append("ms)");
+                var section = displaySections[i];
+                builder.Append(FormatSectionSummary(section));
             }
 
-            return $"{(IsLive ? "live" : "frozen")}{BuildMetadataSuffix()} | {builder}";
+            return $"{(IsLive ? "live" : "frozen")}{BuildMetadataSuffix()} | total={TotalObservedMilliseconds:0.0}ms | tracked={TotalTrackedMilliseconds:0.0}ms | untracked={UntrackedMilliseconds:0.0}ms ({GetPercentage(UntrackedMilliseconds):0.0}%) | {builder}";
+        }
+
+        private string FormatSectionSummary(TimingSectionSnapshot section)
+        {
+            double share = GetPercentage(section.TotalMilliseconds);
+
+            return new StringBuilder()
+                .Append(section.Name)
+                .Append(' ')
+                .Append(section.TotalMilliseconds.ToString("0.0"))
+                .Append("ms (")
+                .Append(share.ToString("0.0"))
+                .Append("%) x")
+                .Append(section.SampleCount)
+                .Append(" (max ")
+                .Append(section.MaxMilliseconds.ToString("0.0"))
+                .Append("ms)")
+                .ToString();
+        }
+
+        private double GetPercentage(double valueMilliseconds)
+        {
+            if (TotalObservedMilliseconds <= 0.0)
+            {
+                return 0.0;
+            }
+
+            return (valueMilliseconds / TotalObservedMilliseconds) * 100.0;
         }
 
         /// <summary>
@@ -393,29 +474,41 @@ namespace PacMan.Agent.Debugging
         /// <returns>A multi-line ASCII plot string.</returns>
         public string BuildAsciiBarPlot(int maxSections = 8, int barWidth = 24)
         {
-            if (!HasData)
+            var displaySections = GetDisplaySections();
+            if (displaySections.Length == 0)
             {
-                return $"{(IsLive ? "live" : "frozen")}{BuildMetadataSuffix()} | no samples yet";
+                return $"{(IsLive ? "live" : "frozen")}{BuildMetadataSuffix()} | total={TotalObservedMilliseconds:0.0}ms | tracked={TotalTrackedMilliseconds:0.0}ms | untracked={UntrackedMilliseconds:0.0}ms ({GetPercentage(UntrackedMilliseconds):0.0}%) | no samples yet";
             }
 
             var builder = new StringBuilder();
-            var orderedSections = Sections
+            var orderedSections = displaySections
                 .OrderByDescending(section => section.TotalMilliseconds)
                 .ThenBy(section => section.Name)
-                .Take(Mathf.Clamp(maxSections, 1, Sections.Length))
+                .Take(Mathf.Clamp(maxSections, 1, displaySections.Length))
                 .ToArray();
 
             var maxTotal = orderedSections.Max(section => section.TotalMilliseconds);
-            builder.AppendLine($"{(IsLive ? "live" : "final")} timing plot{BuildMetadataSuffix()}");
+            builder.AppendLine($"{(IsLive ? "live" : "final")} timing plot{BuildMetadataSuffix()} | total={TotalObservedMilliseconds:0.0}ms | tracked={TotalTrackedMilliseconds:0.0}ms | untracked={UntrackedMilliseconds:0.0}ms ({GetPercentage(UntrackedMilliseconds):0.0}%)");
 
             foreach (var section in orderedSections)
             {
+                var share = GetPercentage(section.TotalMilliseconds);
                 var fill = maxTotal <= 0.0
                     ? 0
                     : Mathf.Clamp(Mathf.RoundToInt((float)(section.TotalMilliseconds / maxTotal * barWidth)), 1, barWidth);
                 var bar = new string('#', fill).PadRight(barWidth, '.');
                 builder.AppendLine(
-                    $"{section.Name,-16} [{bar}] {section.TotalMilliseconds:0.00} ms  avg {section.AverageMilliseconds:0.00}  max {section.MaxMilliseconds:0.00}  n {section.SampleCount}");
+                    $"{section.Name,-16} [{bar}] {section.TotalMilliseconds:0.00} ms ({share:0.0}%)  avg {section.AverageMilliseconds:0.00}  max {section.MaxMilliseconds:0.00}  n {section.SampleCount}");
+            }
+
+            if (UntrackedMilliseconds > 0.0)
+            {
+                var untrackedFill = maxTotal <= 0.0
+                    ? 0
+                    : Mathf.Clamp(Mathf.RoundToInt((float)(UntrackedMilliseconds / maxTotal * barWidth)), 1, barWidth);
+                var untrackedBar = new string('-', untrackedFill).PadRight(barWidth, '.');
+                builder.AppendLine(
+                    $"{"Untracked",-16} [{untrackedBar}] {UntrackedMilliseconds:0.00} ms ({GetPercentage(UntrackedMilliseconds):0.0}%)  avg n/a  max n/a  n 0");
             }
 
             return builder.ToString();
@@ -439,6 +532,13 @@ namespace PacMan.Agent.Debugging
             }
 
             return suffix.ToString();
+        }
+
+        private TimingSectionSnapshot[] GetDisplaySections()
+        {
+            return Sections
+                .Where(section => !string.Equals(section.Name, TickTotalSectionName, StringComparison.Ordinal))
+                .ToArray();
         }
     }
 
