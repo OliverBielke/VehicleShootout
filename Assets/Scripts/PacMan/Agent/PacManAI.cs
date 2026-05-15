@@ -273,89 +273,95 @@ namespace PacMan.Agent
         
         public override PacManAction Tick()
         {
-            Vector3 velocity = _agent.GetVelocity();
-            int carriedFoodCount = _agent.GetCarriedFoodCount();
-
-            using (DebugManager.BeginTimingScope("AI/Tick/PreDecision"))
+            using (DebugManager.BeginTimingScope("Total"))
             {
-                _agent.GetTimeRemaining();
-                _agent.GetScore();
 
-                int currentRespawnStep = _agent.GetLastRespawnStep();
-                if (_lastKnownRespawnStep != currentRespawnStep)
+
+                Vector3 velocity = _agent.GetVelocity();
+                int carriedFoodCount = _agent.GetCarriedFoodCount();
+
+                using (DebugManager.BeginTimingScope("AI/Tick/PreDecision"))
                 {
-                    ClearCurrentPath();
-                    _lastKnownRespawnStep = currentRespawnStep;
-                    _attackerThreatRetreatActive = false;
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    _attackerRegroupAfterReturnHome = false;
-                    _lastPlannedUnsafeCellCount = 0;
-                    _hasLatchedHomeTarget = false;
-                    _lastHomeTargetRefreshStep = -99999;
-                    _lastScaredCounterRaidTargetStep = -99999;
-                    _teammateYieldBackoffUntilStep = -1;
-                    _teammateYieldObstacleUntilStep = -1;
-                    _teammateYieldRetriggerBlockedUntilStep = -1;
-                    _teammateYieldWaitingForSeparation = false;
-                    TeamAssigner.Instance.SwapTeamLeader(_agent);
-                }
+                    _agent.GetTimeRemaining();
+                    _agent.GetScore();
 
-                RegisterConsumedEnemyCapsuleFromTeamPositions();
-
-                TryTriggerTeammateYield();
-
-                if (IsTeammateYieldBackoffActive())
-                {
-                    ClearCurrentPath();
-                    _previousMode = _currentMode;
-                    _btReason = "Yielding to teammate";
-                    _previousCarriedFoodCount = carriedFoodCount;
-                    return new PacManAction
+                    int currentRespawnStep = _agent.GetLastRespawnStep();
+                    if (_lastKnownRespawnStep != currentRespawnStep)
                     {
-                        Acceleration = _teammateYieldBackoffAcceleration
-                    };
+                        ClearCurrentPath();
+                        _lastKnownRespawnStep = currentRespawnStep;
+                        _attackerThreatRetreatActive = false;
+                        _previousCarriedFoodCount = carriedFoodCount;
+                        _attackerRegroupAfterReturnHome = false;
+                        _lastPlannedUnsafeCellCount = 0;
+                        _hasLatchedHomeTarget = false;
+                        _lastHomeTargetRefreshStep = -99999;
+                        _lastScaredCounterRaidTargetStep = -99999;
+                        _teammateYieldBackoffUntilStep = -1;
+                        _teammateYieldObstacleUntilStep = -1;
+                        _teammateYieldRetriggerBlockedUntilStep = -1;
+                        _teammateYieldWaitingForSeparation = false;
+                        TeamAssigner.Instance.SwapTeamLeader(_agent);
+                    }
+
+                    RegisterConsumedEnemyCapsuleFromTeamPositions();
+
+                    TryTriggerTeammateYield();
+
+                    if (IsTeammateYieldBackoffActive())
+                    {
+                        ClearCurrentPath();
+                        _previousMode = _currentMode;
+                        _btReason = "Yielding to teammate";
+                        _previousCarriedFoodCount = carriedFoodCount;
+                        return new PacManAction
+                        {
+                            Acceleration = _teammateYieldBackoffAcceleration
+                        };
+                    }
+
+                    bool justDepositedFood =
+                        _assignedRole == StaticRole.Attack &&
+                        _previousCarriedFoodCount > 0 &&
+                        carriedFoodCount == 0 &&
+                        IsInOwnTerritory(transform.localPosition);
+
+                    if (justDepositedFood)
+                    {
+                        _attackerRegroupAfterReturnHome = true;
+                        ClearCurrentPath();
+                    }
                 }
 
-                bool justDepositedFood =
-                    _assignedRole == StaticRole.Attack &&
-                    _previousCarriedFoodCount > 0 &&
-                    carriedFoodCount == 0 &&
-                    IsInOwnTerritory(transform.localPosition);
+                _lastDecision = EvaluateCurrentRoleTree();
 
-                if (justDepositedFood)
+                _currentMode = _lastDecision.Mode;
+
+                if (_currentMode != _previousMode)
                 {
-                    _attackerRegroupAfterReturnHome = true;
                     ClearCurrentPath();
                 }
+
+                Vector2 accel = ExecuteDecision(_lastDecision, velocity);
+
+                _previousMode = _currentMode;
+                _previousCarriedFoodCount = carriedFoodCount;
+
+                var teamManager = TeamAssigner.Instance;
+                bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||
+                                teamManager.MembersByLeaderRed.ContainsKey(_agent);
+                Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
+
+                if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
+                {
+                    accel *= 0f;
+                }
+
+                return new PacManAction
+                {
+                    Acceleration = accel
+                };
             }
-
-            _lastDecision = EvaluateCurrentRoleTree();
-
-            _currentMode = _lastDecision.Mode;
-
-            if (_currentMode != _previousMode)
-            {
-                ClearCurrentPath();
-            }
-
-            Vector2 accel = ExecuteDecision(_lastDecision, velocity);
-
-            _previousMode = _currentMode;
-            _previousCarriedFoodCount = carriedFoodCount;
-            
-            var teamManager = TeamAssigner.Instance;
-            bool isLeader = teamManager.MembersByLeaderBlue.ContainsKey(_agent) ||  teamManager.MembersByLeaderRed.ContainsKey(_agent);
-            Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
-            
-            if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
-            {
-                accel *= 0f;
-            }
-            
-            return new PacManAction
-            {
-                Acceleration = accel
-            };
         }
         private BTDecision EvaluateCurrentRoleTree()
         {

@@ -191,7 +191,11 @@ namespace PacMan.Agent.Debugging
             GUILayout.Label(snapshot.IsLive ? "Timing summary (live)" : "Timing summary (frozen)", headerStyle);
             GUILayout.Label($"Run {snapshot.RunElapsedSeconds:0.0}s | sim {snapshot.SimulationTimeSeconds:0.0}s | total {snapshot.TotalObservedMilliseconds:0.0} ms", rowStyle);
 
-            var sections = snapshot.Sections.OrderByDescending(section => section.TotalMilliseconds).Take(6).ToArray();
+            var sections = snapshot.Sections
+                .Where(section => !string.Equals(section.Name, "Total", StringComparison.Ordinal))
+                .OrderByDescending(section => section.TotalMilliseconds)
+                .Take(6)
+                .ToArray();
             var maxTotalMs = Mathf.Max(0.0001f, sections.Max(section => (float)section.TotalMilliseconds));
             var maxDisplayedMs = Mathf.Max(maxTotalMs, (float)snapshot.UntrackedMilliseconds);
 
