@@ -19,8 +19,7 @@ namespace PacMan.Agent
     {
         None,
         Attack,
-        Defend,
-        BodyGuard
+        Defend
     }
 
     public class PacManAIDebugBT : PacManAI
@@ -368,18 +367,23 @@ namespace PacMan.Agent
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
+            // Check if this agent is a body guard (has a leader)
+            PacManAgentManager leader = null;
+            bool isBodyGuard = TeamAssigner.Instance != null && TeamAssigner.Instance.TryGetLeader(_agent, out leader);
+            
+            if (isBodyGuard && leader != null)
+            {
+                // This agent is a body guard, use the body guard tree
+                BodyGuardBlackboard bb = BuildBodyGuardBlackboard();
+                _btReason = bb.debugReason;
+                using (DebugManager.BeginTimingScope("AI/Decision/BodyGuardTree"))
+                {
+                    return _bodyGuardTree.Evaluate(bb);
+                }
+            }
+
             switch (_assignedRole)
             {
-                case StaticRole.BodyGuard:
-                {
-                    BodyGuardBlackboard bb = BuildBodyGuardBlackboard();
-                    _btReason = bb.debugReason;
-                    using (DebugManager.BeginTimingScope("AI/Decision/BodyGuardTree"))
-                    {
-                        return _bodyGuardTree.Evaluate(bb);
-                    }
-                }
-
                 case StaticRole.Defend:
                 {
                     DefenderBlackboard bb = BuildDefenderBlackboard();
@@ -826,7 +830,7 @@ namespace PacMan.Agent
 
             Vector3 myPos = transform.localPosition;
             UpdateVoronoiData();
-            var defendAssignment = RoleAssigner.Instance?.BodyGuardManager?.GetAssignment(this);
+            var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
             var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
                                                 TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
             bool isPowered = _agent.IsPoweredUp();
@@ -2303,7 +2307,7 @@ namespace PacMan.Agent
             protectedFoodCenter = _hasDefenseAnchor ? _defenseAnchor : transform.localPosition;
             protectedFoodPositions = new List<Vector3>();
 
-            if ((_assignedRole != StaticRole.Defend && _assignedRole != StaticRole.BodyGuard) ||
+            if (_assignedRole != StaticRole.Defend ||
                 !_hasDefenseAnchor ||
                 defenderLaneFoodPileHoldThreshold <= 0 ||
                 _middleInfo.Lanes == null ||
@@ -2323,7 +2327,7 @@ namespace PacMan.Agent
                 ? RoleAssigner.Instance.GetRegisteredAgentsForTeam(myTeam)
                     .Where(agent =>
                         agent != null &&
-                        (agent.AssignedRole == StaticRole.Defend || agent.AssignedRole == StaticRole.BodyGuard) &&
+                        agent.AssignedRole == StaticRole.Defend &&
                         agent.HasDefenseAnchor)
                     .ToList()
                 : new List<PacManAIDebugBT>();
@@ -3089,9 +3093,7 @@ namespace PacMan.Agent
 
         private bool ShouldIgnoreTeammateYieldWhileSettled()
         {
-            if ((_assignedRole != StaticRole.Defend && _assignedRole != StaticRole.BodyGuard) ||
-                _lastDecision == null ||
-                !_lastDecision.HasTarget)
+            if (_assignedRole != StaticRole.Defend || _lastDecision == null || !_lastDecision.HasTarget)
                 return false;
 
             bool isHoldingPosition =
