@@ -53,6 +53,7 @@ namespace PacMan.Agent
         [SerializeField] private bool _hasDefenseAnchor = false;
         [SerializeField] private Vector3 _attackAnchor;
         [SerializeField] private bool _hasAttackAnchor = false;
+        [SerializeField] private bool debugLOS = false;
         private MapMiddleAnalyzer _middleAnalyzer;
         private MapMiddleAnalyzer.MiddleInfo _middleInfo;
         [Header("Attack Patrol")]
@@ -275,7 +276,8 @@ namespace PacMan.Agent
         {
             _agent.GetTimeRemaining();
             _agent.GetScore();
-                
+
+            
             
             Vector3 velocity = _agent.GetVelocity();
             int carriedFoodCount = _agent.GetCarriedFoodCount();
@@ -666,7 +668,7 @@ namespace PacMan.Agent
                 enforceOwnTerritoryPath ? IsInOwnTerritory : null,
                 VoronoiCellScaleFactor,
                 voronoiPathDangerPenaltyMultiplier);
-            List<Vector3> aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
+            List<Vector3> aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, GetTrackedEnemies().Select(e => e.Position).ToList(),_currentVoronoi);
 
             _lastPlannedGoalPosition = _goalPosition;
             _lastPlannedUnsafeCellCount = CountUnsafeCellsOnPath(aStarPath);
@@ -3183,8 +3185,13 @@ namespace PacMan.Agent
             _waypoints = null;
             _droneControlling = null;
         }
+        
         private void OnDrawGizmos()
         {
+            if (debugLOS)
+            {
+                LosField.instance.DrawLosField(this);
+            }
             MapEditing.DrawObstacleMap(transform, _obstacleMap, drawObstacleMap);
             if (DebugManager.Instance != null && DebugManager.Instance.path)
             {
