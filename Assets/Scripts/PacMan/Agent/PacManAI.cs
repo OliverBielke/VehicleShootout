@@ -43,6 +43,7 @@ namespace PacMan.Agent
         private GameObject _currentFoodTarget;
         private BehaviorTree<DefenderBlackboard> _defenderTree;
         private BehaviorTree<AttackerBlackboard> _attackerTree;
+        private BehaviorTree<BodyGuardBlackboard> _bodyGuardTree;
         private BTDecision _lastDecision;
         private string _btReason = "-";
         private StaticRole _staticAssignedRole = StaticRole.None;
@@ -244,6 +245,7 @@ namespace PacMan.Agent
             // All of the calls below should also work in here. Report it as a bug if you find that some part of the observations is inaccessible during init.
             _hasGoal = false;
             _defenderTree = DefenderTreeFactory.Create();
+            _bodyGuardTree = BodyGuardTreeFactory.Create();
             _attackerTree = AttackerTreeFactory.Create();
             _middleAnalyzer = new MapMiddleAnalyzer(_obstacleMap);
             _middleInfo = _middleAnalyzer.Analyze();
@@ -365,6 +367,21 @@ namespace PacMan.Agent
         }
         private BTDecision EvaluateCurrentRoleTree()
         {
+            // Check if this agent is a body guard (has a leader)
+            PacManAgentManager leader = null;
+            bool isBodyGuard = TeamAssigner.Instance != null && TeamAssigner.Instance.TryGetLeader(_agent, out leader);
+            
+            if (isBodyGuard && leader != null)
+            {
+                // This agent is a body guard, use the body guard tree
+                BodyGuardBlackboard bb = BuildBodyGuardBlackboard();
+                _btReason = bb.debugReason;
+                using (DebugManager.BeginTimingScope("AI/Decision/BodyGuardTree"))
+                {
+                    return _bodyGuardTree.Evaluate(bb);
+                }
+            }
+
             switch (_assignedRole)
             {
                 case StaticRole.Defend:
@@ -807,9 +824,9 @@ namespace PacMan.Agent
             return Mathf.Abs(stableId) % interval;
         }
         
-        private DefenderBlackboard BuildBodyGuardBlackboard()
+        private BodyGuardBlackboard BuildBodyGuardBlackboard()
         {
-            DefenderBlackboard bb = new DefenderBlackboard();
+            BodyGuardBlackboard bb = new BodyGuardBlackboard();
 
             Vector3 myPos = transform.localPosition;
             UpdateVoronoiData();
