@@ -164,7 +164,7 @@ public class TeamAssigner : MonoBehaviour
             float partHpPresent = totalHP / (presentTeamCount * 100f);
             float totalMultiplier = partMembersPresent * partHpPresent;
 
-            if (totalMultiplier > 1.01f || totalMultiplier < .3f)
+            if (totalMultiplier > 1.01f || totalMultiplier < -.01f)
             {
                 Debug.LogWarning($"Calculated readiness multiplier for team {teamSignature} is out of bounds: {totalMultiplier}. " +
                                          $"Present members: {presentTeamCount}/{maxTeamCount}, " +

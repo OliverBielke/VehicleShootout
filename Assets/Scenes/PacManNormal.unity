@@ -4881,6 +4881,7 @@ MonoBehaviour:
   enemyLocalization: 0
   agentHud: 0
   visualizeGroups: 0
+  borderAdvantage: 0
   timeKeeper: 0
   timingLogIntervalSeconds: 5
   timingLongSampleThresholdMs: 25
@@ -14679,9 +14680,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 960ffb818f24f4cd6ab897467c6d9bd0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TeamAssigner
-  staticGroupSize: 4
+  staticGroupSize: 3
   TeamUpdatePeriod: 1000000
-  attackerCount: 2
+  attackerCount: 3
 --- !u!114 &316193601
 MonoBehaviour:
   m_ObjectHideFlags: 0

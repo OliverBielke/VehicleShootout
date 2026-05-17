@@ -223,7 +223,7 @@ namespace PacMan.Agent.RoleAssignment
         /// <returns>Number of attackers.</returns>
         private static int GetAttackerCount(int teamSize)
         {
-            return teamSize >= 3 ? 2 : 1;
+            return teamSize >= 4 ? 3 : 2;
         }
 
         private void AssignDefenseAnchors(List<PacManAIDebugBT> defenders)
