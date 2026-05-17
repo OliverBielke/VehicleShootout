@@ -37,13 +37,11 @@ namespace PacMan.Agent.RoleAssignment
         private MapMiddleAnalyzer.MiddleInfo _middleInfo;
         private DefendManager _defendManager;
         private AttackManager _attackManager;
-        private BodyGuardManager _bodyGuardManager;
 
         private Coroutine _assignCoroutine;
         private float _nextAttackLaneSwitchTime;
         public DefendManager DefendManager => _defendManager;
         public AttackManager AttackManager => _attackManager;
-        public BodyGuardManager BodyGuardManager => _bodyGuardManager;
         public float DefenderIntrusionMidlineBuffer => defenderIntrusionMidlineBuffer;
         public float MidXLocal => _middleInfo.MidXLocal;
 
@@ -71,7 +69,6 @@ namespace PacMan.Agent.RoleAssignment
             _middleAnalyzer = new MapMiddleAnalyzer(_obstacleMap);
             _middleInfo = _middleAnalyzer.Analyze();
             _defendManager = new DefendManager(this);
-            _bodyGuardManager = new BodyGuardManager(this);
             _attackManager = new AttackManager(this);
             _nextAttackLaneSwitchTime = Time.time + attackLaneSwitchInterval;
 
@@ -171,7 +168,8 @@ namespace PacMan.Agent.RoleAssignment
                 foreach (var bodyguard in memberLeaderDict[attacker.AgentManager])
                 {
                     var bodyGuardAI = bodyguard.GetComponent<PacManAIDebugBT>();
-                    bodyGuardAI.SetAssignedRole(StaticRole.BodyGuard);
+                    allAttackers.Add(bodyGuardAI);
+                    bodyGuardAI.SetAssignedRole(StaticRole.Attack);
                     bodyGuardAI.ClearDefenseAnchor();
                     bodyGuardAI.ClearAttackAnchor();
                 }
@@ -188,9 +186,9 @@ namespace PacMan.Agent.RoleAssignment
                 foreach (var bodyguard in memberLeaderDict[defender.AgentManager])
                 {
                     var bodyGuardAI = bodyguard.GetComponent<PacManAIDebugBT>();
-                    bodyGuardAI.SetAssignedRole(StaticRole.BodyGuard);
+                    allDefenders.Add(bodyGuardAI);
+                    bodyGuardAI.SetAssignedRole(StaticRole.Defend);
                     bodyGuardAI.ClearAttackAnchor();
-                    bodyGuardAI.ClearDefenseAnchor();
                 }
                 defender.SetAssignedRole(StaticRole.Defend);
                 defender.ClearAttackAnchor();

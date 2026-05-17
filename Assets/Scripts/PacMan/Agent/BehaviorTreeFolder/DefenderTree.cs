@@ -37,6 +37,26 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                     {
                         new SequenceNode<DefenderBlackboard>(
+                            "Group Up With Team Sequence",
+                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
+                            {
+                                new ConditionNode<DefenderBlackboard>(
+                                    "Has Leader",
+                                    bb => bb.hasTeamLeader
+                                ),
+                                new ActionNode<DefenderBlackboard>(
+                                    "MoveToLeader",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Attack,
+                                        "MoveToLeader",
+                                        hasTarget: true,
+                                        targetPosition: bb.teamLeaderPosition
+                                    )
+                                )
+                            }
+                        ),
+                        
+                        new SequenceNode<DefenderBlackboard>(
                             "Grab Power Capsule Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                             {
