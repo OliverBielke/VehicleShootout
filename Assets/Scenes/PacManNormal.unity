@@ -4875,8 +4875,8 @@ MonoBehaviour:
   obstacleMap: 0
   middle: 0
   voronoi: 0
-  aStar: 0
-  path: 0
+  aStar: 1
+  path: 1
   vO: 0
   enemyLocalization: 0
   agentHud: 0

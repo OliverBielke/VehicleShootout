@@ -122,7 +122,7 @@ namespace PacMan.Agent
         [SerializeField] private int teammateYieldObstacleSteps = 20;
         [SerializeField] private int teammateYieldRetriggerCooldownSteps = 12;
         [SerializeField] private float teammateYieldGoalIgnoreRadius = 0.5f;
-        [SerializeField] private float teammateYieldObstacleInflation = 1f;
+        [SerializeField] private float teammateYieldObstacleInflation = 0.1f;
         [SerializeField] private float teammateYieldSettledTargetDistance = 0.45f;
         [SerializeField] private float teammateYieldReleaseDistance = 1.1f;
         [Header("Team/Group Logic")]
@@ -2821,6 +2821,14 @@ namespace PacMan.Agent
             return true;
         }
 
+        /// <summary>
+        /// Builds the dynamic obstacle set used by pathfinding for the current move.
+        /// This includes inflated capsule obstacles and, when relevant, inflated teammate-yield obstacles.
+        /// </summary>
+        /// <param name="goalPosition">The target position the agent is currently trying to reach.</param>
+        /// <param name="capsuleObstacleCount">Outputs the number of capsule-related obstacle points added.</param>
+        /// <param name="teammateYieldObstacleCount">Outputs the number of teammate-yield obstacle points added.</param>
+        /// <returns>A list of dynamic obstacle positions to feed into the path builder.</returns>
         private List<Vector3> BuildDynamicPathObstacles(
             Vector3 goalPosition,
             out int capsuleObstacleCount,
