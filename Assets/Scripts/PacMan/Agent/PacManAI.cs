@@ -876,152 +876,20 @@ namespace PacMan.Agent
             return Mathf.Abs(stableId) % interval;
         }
         
+        // Bodyguard behaviour simplified: only group up with team leader. Other power-play/loot behavior removed.
         private BodyGuardBlackboard BuildBodyGuardBlackboard()
         {
             BodyGuardBlackboard bb = new BodyGuardBlackboard();
 
-            Vector3 myPos = transform.localPosition;
-            UpdateVoronoiData();
-            var defendAssignment = RoleAssigner.Instance?.BodyGuardManager?.GetAssignment(this);
-            var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
-                                                TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
-            bool isPowered = _agent.IsPoweredUp();
-            bool isScared = _agent.IsScared();
-            float scaredRemaining = Mathf.Max(0f, _agent.GetScaredRemainingDuration());
-            int carriedFood = _agent.GetCarriedFoodCount();
-            Vector3 homeTarget = GetSafestHomePoint();
-            bool holdLaneDueToFoodPile = ShouldHoldDefenderLaneDueToFoodPile(
-                out int protectedLaneFoodCount,
-                out Vector3 protectedFoodCenter,
-                out List<Vector3> protectedFoodPositions);
-
             bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
             bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
-            
-            bb.homeTargetPosition = homeTarget;
 
-            if (isScared)
-            {
-                if (carriedFood >= poweredReturnFoodThreshold || scaredRemaining < 2f)
-                {
-                    bb.shouldReturnHome = true;
-                    bb.debugReason = carriedFood >= poweredReturnFoodThreshold
-                        ? "Scared loot threshold reached"
-                        : "Scared ending soon, returning home";
-                }
-                else
-                {
-                    var scaredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
-                    GameObject selectedFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, scaredAssignment?.FoodTarget));
-                    string selectedFoodReason = selectedFoodTarget != null
-                        ? "Scared counter-raid (safest pill)"
-                        : (scaredAssignment?.Reason ?? "Scared counter-raid");
+            // Provide sensible defaults for other fields so callers won't see null data.
+            bb.homeTargetPosition = GetSafestHomePoint();
+            bb.formationPoint = _hasDefenseAnchor ? _defenseAnchor : transform.localPosition;
+            bb.dropZonePoint = bb.formationPoint;
+            bb.debugReason = bb.hasTeamLeader ? "Group up with leader" : "No leader assigned";
 
-                    if (selectedFoodTarget != null && ShouldRetryFoodTarget(selectedFoodTarget.transform.localPosition))
-                    {
-                        GameObject alternateFoodTarget = GetAlternativeFoodTarget(activeFood, selectedFoodTarget);
-                        if (alternateFoodTarget != null)
-                        {
-                            selectedFoodTarget = alternateFoodTarget;
-                            RegisterUnsafeFoodRetarget();
-                            selectedFoodReason = $"Assigned pill path too unsafe ({_lastPlannedUnsafeCellCount} unsafe cells), trying alternate";
-                        }
-                    }
-
-                    if (selectedFoodTarget != null)
-                    {
-                        SetCurrentFoodTarget(selectedFoodTarget);
-                        _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
-                        bb.debugReason = selectedFoodReason;
-                    }
-                    else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
-                    {
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
-                        bb.debugReason = "Scared counter-raid (committed pill)";
-                    }
-                    else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
-                    {
-                        SetCurrentFoodTarget(null);
-                        bb.shouldLootWhilePowered = true;
-                        bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
-                        bb.debugReason = "Scared counter-raid fallback";
-                    }
-                    else
-                    {
-                        SetCurrentFoodTarget(null);
-                        _lastScaredCounterRaidTargetStep = -99999;
-                        bb.shouldReturnHome = true;
-                        bb.debugReason = "Scared with no enemy pill target";
-                    }
-                }
-            }
-            else if (isPowered && !holdLaneDueToFoodPile)
-            {
-                bb.shouldReturnHome = carriedFood >= poweredReturnFoodThreshold;
-
-                var poweredAssignment = RoleAssigner.Instance?.AttackManager?.GetAssignment(this, activeFood, includePoweredDefenders: true);
-                GameObject poweredFoodTarget = GetSafestFoodTarget(activeFood, GetPreferredFoodTarget(activeFood, poweredAssignment?.FoodTarget));
-                if (!bb.shouldReturnHome && poweredFoodTarget != null)
-                {
-                    SetCurrentFoodTarget(poweredFoodTarget);
-                    bb.shouldLootWhilePowered = true;
-                    bb.enemyPillTargetPosition = poweredFoodTarget.transform.localPosition;
-                    bb.debugReason = "Powered up loot mode";
-                }
-                else if (bb.shouldReturnHome)
-                {
-                    SetCurrentFoodTarget(null);
-                    bb.debugReason = "Powered loot threshold reached";
-                }
-            }
-            else if (isPowered && holdLaneDueToFoodPile)
-            {
-                SetCurrentFoodTarget(null);
-                bb.debugReason = $"Powered guarding lane pill pile ({protectedLaneFoodCount} pills)";
-            }
-
-            bool defendAssignmentAllowed =
-                defendAssignment != null &&
-                (!holdLaneDueToFoodPile ||
-                 IsIntruderNearProtectedFoodPile(defendAssignment.TargetPosition, protectedFoodCenter, protectedFoodPositions));
-
-            if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && defendAssignmentAllowed)
-            {
-                bb.enemyPacmanIntruderSuspected = true;
-                bb.suspectedIntruderPosition = defendAssignment.TargetPosition;
-                bb.debugReason = defendAssignment.Reason;
-            }
-            else if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && holdLaneDueToFoodPile)
-            {
-                if (string.IsNullOrEmpty(bb.debugReason))
-                    bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
-            }
-
-            bb.safeMiddlePillsAvailable = false;
-            bb.safeMiddlePillPosition = Vector3.zero;
-            if (!bb.shouldLootWhilePowered &&
-                !bb.shouldReturnHome &&
-                !bb.enemyPacmanIntruderSuspected &&
-                (!isPowered || !holdLaneDueToFoodPile) &&
-                TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
-            {
-                bb.safeMiddlePillsAvailable = true;
-                bb.safeMiddlePillPosition = safeMiddleTarget;
-                bb.debugReason = safeMiddleReason;
-            }
-
-            bb.formationPoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
-            bb.dropZonePoint = _hasDefenseAnchor ? _defenseAnchor : myPos;
-
-            bb.outsideDefensiveZone =
-                _hasDefenseAnchor &&
-                Vector3.Distance(myPos, _defenseAnchor) > 1.25f;
-
-            if (string.IsNullOrEmpty(bb.debugReason))
-                bb.debugReason = "Default defend state";
 
             return bb;
         }
@@ -1105,27 +973,24 @@ namespace PacMan.Agent
                             }
                         }
 
-                        if (selectedFoodTarget != null)
-                        {
-                            SetCurrentFoodTarget(selectedFoodTarget);
-                            _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
-                            bb.shouldLootWhilePowered = true;
-                            bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
-                            bb.debugReason = selectedFoodReason;
-                        }
-                        else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
-                        {
-                            bb.shouldLootWhilePowered = true;
-                            bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
-                            bb.debugReason = "Scared counter-raid (committed pill)";
-                        }
-                        else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
-                        {
-                            SetCurrentFoodTarget(null);
-                            bb.shouldLootWhilePowered = true;
-                            bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
-                            bb.debugReason = "Scared counter-raid fallback";
-                        }
+                            if (selectedFoodTarget != null)
+                            {
+                                SetCurrentFoodTarget(selectedFoodTarget);
+                                _lastScaredCounterRaidTargetStep = _agent != null ? _agent.GetStepsSinceMatchStart() : 0;
+                                bb.enemyPillTargetPosition = selectedFoodTarget.transform.localPosition;
+                                bb.debugReason = selectedFoodReason;
+                            }
+                            else if (TryGetCommittedScaredCounterRaidTarget(activeFood, out var committedScaredFoodTarget))
+                            {
+                                bb.enemyPillTargetPosition = committedScaredFoodTarget.transform.localPosition;
+                                bb.debugReason = "Scared counter-raid (committed pill)";
+                            }
+                            else if (TryGetSafestFoodPosition(myPos, activeFood, out var fallbackScaredFoodTarget))
+                            {
+                                SetCurrentFoodTarget(null);
+                                bb.enemyPillTargetPosition = fallbackScaredFoodTarget;
+                                bb.debugReason = "Scared counter-raid fallback";
+                            }
                         else
                         {
                             SetCurrentFoodTarget(null);
@@ -1147,7 +1012,6 @@ namespace PacMan.Agent
                     if (!bb.shouldReturnHome && poweredFoodTarget != null)
                     {
                         SetCurrentFoodTarget(poweredFoodTarget);
-                        bb.shouldLootWhilePowered = true;
                         bb.enemyPillTargetPosition = poweredFoodTarget.transform.localPosition;
                         bb.debugReason = "Powered up loot mode";
                     }
@@ -1176,13 +1040,13 @@ namespace PacMan.Agent
                     (!holdLaneDueToFoodPile ||
                      IsIntruderNearProtectedFoodPile(defendAssignment.TargetPosition, protectedFoodCenter, protectedFoodPositions));
 
-                if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && defendAssignmentAllowed)
+                if (!bb.shouldReturnHome && defendAssignmentAllowed)
                 {
                     bb.enemyPacmanIntruderSuspected = true;
                     bb.suspectedIntruderPosition = defendAssignment.TargetPosition;
                     bb.debugReason = defendAssignment.Reason;
                 }
-                else if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome && holdLaneDueToFoodPile)
+                else if (!bb.shouldReturnHome && holdLaneDueToFoodPile)
                 {
                     if (string.IsNullOrEmpty(bb.debugReason))
                         bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
@@ -1193,7 +1057,7 @@ namespace PacMan.Agent
             bb.borderAdvantageSquarePosition = Vector3.zero;
             using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckBorderAdvantageSquare"))
             {
-                if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome)
+                if (!bb.shouldReturnHome)
                 {
                     var trackedEnemies = GetTrackedEnemies();
                     if (TryGetBorderAdvantageSquareTarget(trackedEnemies, out var borderAdvantageTarget, out var borderAdvantageReason))
@@ -1210,8 +1074,7 @@ namespace PacMan.Agent
             bb.safeMiddlePillPosition = Vector3.zero;
             using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckSafeMiddlePills"))
             {
-                if (!bb.shouldLootWhilePowered &&
-                    !bb.shouldReturnHome &&
+                if (!bb.shouldReturnHome &&
                     !bb.enemyPacmanIntruderSuspected &&
                     (!isPowered || !holdLaneDueToFoodPile) &&
                     TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))

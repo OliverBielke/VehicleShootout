@@ -5,8 +5,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
     [System.Serializable]
     public class DefenderBlackboard
     {
-        public bool shouldGrabPowerCapsule;
-        public bool shouldLootWhilePowered;
         public bool shouldReturnHome;
         /// <summary>True when the defender should hold a square near the border because nearby friendly support outmatches visible/tracked enemies.</summary>
         public bool borderAdvantageSquareAvailable;
@@ -16,7 +14,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool hasTeamLeader;
         
         public Vector3 teamLeaderPosition;
-        public Vector3 powerCapsuleTargetPosition;
         public Vector3 homeTargetPosition;
         public Vector3 enemyPillTargetPosition;
         /// <summary>Target square on our side of the border that offers a health advantage against nearby enemies.</summary>
@@ -39,26 +36,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                     {
                         new SequenceNode<DefenderBlackboard>(
-                            "Grab Power Capsule Sequence",
-                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
-                            {
-                                new ConditionNode<DefenderBlackboard>(
-                                    "shouldGrabPowerCapsule",
-                                    bb => bb.shouldGrabPowerCapsule
-                                ),
-                                new ActionNode<DefenderBlackboard>(
-                                    "GrabPowerCapsule",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Attack,
-                                        "GrabPowerCapsule",
-                                        hasTarget: true,
-                                        targetPosition: bb.powerCapsuleTargetPosition
-                                    )
-                                )
-                            }
-                        ),
-
-                        new SequenceNode<DefenderBlackboard>(
                             "Return Home Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                             {
@@ -78,25 +55,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
                             }
                         ),
 
-                        new SequenceNode<DefenderBlackboard>(
-                            "Loot While Powered Sequence",
-                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
-                            {
-                                new ConditionNode<DefenderBlackboard>(
-                                    "shouldLootWhilePowered",
-                                    bb => bb.shouldLootWhilePowered
-                                ),
-                                new ActionNode<DefenderBlackboard>(
-                                    "CollectEnemyPills",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Attack,
-                                        "CollectEnemyPills",
-                                        hasTarget: true,
-                                        targetPosition: bb.enemyPillTargetPosition
-                                    )
-                                )
-                            }
-                        ),
 
                         // Hold a nearby border square when our defenders/bodyguards have the health advantage.
                         new SequenceNode<DefenderBlackboard>(
