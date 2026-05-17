@@ -6,14 +6,15 @@ using UnityEngine;
 
 namespace PacMan.Agent.PathFinding
 {
-    public struct LosData
+    public struct LosAgentData
     {
-        public int VisibleEnemies;
-        public float Danger;
+        public List<Vector3> EnemyPositions;
+        public float losMultiplier;
     }
     public class LosField :  MonoBehaviour
     {
         [SerializeField] MapManager mapManager;
+        public float GlobalDangerMultiplier = 1f;
         public static LosField instance;
 
         private void Awake()
@@ -38,7 +39,7 @@ namespace PacMan.Agent.PathFinding
         private Dictionary<Vector2Int, HashSet<Vector2Int>> losMap = new  Dictionary<Vector2Int, HashSet<Vector2Int>>();
 
 
-        public float GetDanger(Vector3 worldPos, List<Vector3> enemyPositions)
+        public float GetDanger(Vector3 worldPos, LosAgentData agentData)
         {
             float danger = 0f;
             Vector3Int originCell = obstacleMap.WorldToCell(worldPos);
@@ -46,16 +47,16 @@ namespace PacMan.Agent.PathFinding
             if (!losMap.ContainsKey(originKey))
             {
                 Debug.LogWarning("No LOS map entry found for position in GetDanger, returning danger = 1!");
-                return 1f;
+                return 0f;
             }
 
-            foreach (Vector3 enemyPos in enemyPositions)
+            foreach (Vector3 enemyPos in agentData.EnemyPositions)
             {
                 Vector3Int enemyCell = obstacleMap.WorldToCell(enemyPos);
                 Vector2Int enemyKey = new Vector2Int(enemyCell.x, enemyCell.z);
                 if (losMap[originKey].Contains(enemyKey))
                 {
-                    danger += 1 - Mathf.Clamp01(Vector3.Distance(worldPos, enemyPos)/20f);
+                    danger += (1 - Mathf.Clamp01(Vector3.Distance(worldPos, enemyPos)/20f))*GlobalDangerMultiplier*agentData.losMultiplier;
                 }
             }
             return danger;

@@ -3346,6 +3346,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PacMan.Agent.PathFinding.LosField
   mapManager: {fileID: 1490924509}
+  GlobalDangerMultiplier: 1
   CellScale: 1
 --- !u!4 &83476432
 Transform:

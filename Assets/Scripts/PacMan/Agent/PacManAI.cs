@@ -271,7 +271,8 @@ namespace PacMan.Agent
         {
             RoleAssigner.Instance?.UnregisterAgent(this);
         }
-        
+
+        private LosAgentData _losAgentData = new LosAgentData();
         public override PacManAction Tick()
         {
             using (DebugManager.BeginTimingScope("Total"))
@@ -320,7 +321,7 @@ namespace PacMan.Agent
                             Acceleration = _teammateYieldBackoffAcceleration
                         };
                     }
-
+                    
                     bool justDepositedFood =
                         _assignedRole == StaticRole.Attack &&
                         _previousCarriedFoodCount > 0 &&
@@ -332,6 +333,20 @@ namespace PacMan.Agent
                         _attackerRegroupAfterReturnHome = true;
                         ClearCurrentPath();
                     }
+                    
+                    float roleLosMultiplier = 1f;
+                    float health = _agent.GetHealth()/100f;
+                    if (_assignedRole == StaticRole.Defend)
+                    {
+                        roleLosMultiplier = Mathf.Lerp(-1f, 2f, 1-health); // Defenders are in large groups and should encourage fights
+                    }
+                    else if (_assignedRole == StaticRole.Attack)
+                    {
+                        roleLosMultiplier = Mathf.Lerp(.5f, 5f, 1-health); // Attackers should not really fight
+                    }
+                    
+                    _losAgentData.losMultiplier = roleLosMultiplier;
+                    _losAgentData.EnemyPositions = GetTrackedEnemies().Select(e => e.Position).ToList();
                 }
 
                 _lastDecision = EvaluateCurrentRoleTree();
@@ -685,13 +700,15 @@ namespace PacMan.Agent
             List<Vector3> aStarPath;
             using (DebugManager.BeginTimingScope("AI/Path/AStar"))
             {
+
                 Astar aStar = new Astar(
                     _obstacleMap,
                     dynamicPathObstacles,
                     enforceOwnTerritoryPath ? IsInOwnTerritory : null,
                     VoronoiCellScaleFactor,
-                    voronoiPathDangerPenaltyMultiplier);
-                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, GetTrackedEnemies().Select(e => e.Position).ToList() ,_currentVoronoi);
+                    voronoiPathDangerPenaltyMultiplier,
+                    _losAgentData);
+                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
             }
 
             _lastPlannedGoalPosition = _goalPosition;
@@ -2105,8 +2122,13 @@ namespace PacMan.Agent
         /// <returns>Danger in range [0..1], where lower is safer; returns 0 when no Voronoi data exists.</returns>
         private float GetFoodDanger(Vector3 foodPosition)
         {
+
             if (TryGetPointCellData(foodPosition, out var cellData))
-                return Mathf.Clamp01(cellData.Danger);
+            {
+                Debug.Log($"Los danger of food-position: {LosField.instance.GetDanger(foodPosition, _losAgentData)}");
+                return Mathf.Clamp01(cellData.Danger + LosField.instance.GetDanger(foodPosition, _losAgentData)/3f);
+            }
+                
 
             return 0f;
         }
@@ -2114,7 +2136,7 @@ namespace PacMan.Agent
         private bool IsPointCellSafe(Vector3 pointPosition)
         {
             if (TryGetPointCellData(pointPosition, out var cellData))
-                return cellData.Danger <= _voronoiSafetyThreshold;
+                return cellData.Danger + LosField.instance.GetDanger(pointPosition, _losAgentData) <= _voronoiSafetyThreshold;
 
             if (_currentVoronoi != null && _currentVoronoi.Count > 0)
                 return false;
