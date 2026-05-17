@@ -3,7 +3,6 @@ using System.Linq;
 using UnityEngine;
 using Scripts.Map;
 using UnityEngine.Serialization;
-using PacMan.Agent;
 
 
 namespace PacMan.Agent.Debugging
@@ -45,6 +44,9 @@ namespace PacMan.Agent.Debugging
 
         [Tooltip("Show team/group assignment and formation debug visualizations")]
         public bool visualizeGroups;
+
+        [Tooltip("Show the defender border-advantage search band, sampled candidate squares, and chosen target")]
+        public bool borderAdvantage;
 
         [Header("Timing Debugging")]
         [Tooltip("Enable aggregate timing capture for AI hot paths like Voronoi and A*")]
