@@ -3,6 +3,7 @@ using System.Linq;
 using UnityEngine;
 using Scripts.Map;
 using UnityEngine.Serialization;
+using PacMan.Agent;
 
 
 namespace PacMan.Agent.Debugging
@@ -252,11 +253,20 @@ namespace PacMan.Agent.Debugging
         
         private void OnDrawGizmos()
         {
-            // If the toggle is on, and the map has finished generating somewhere in the game
-            if (obstacleMap && ObstacleMapV2.Instance != null)
+            // If the toggle is on, draw the fine-grained obstacle map used by the AI
+            if (obstacleMap)
             {
-                // Tell the map to draw itself!
-                ObstacleMapV2.Instance.DrawMapGizmos();
+                // Try to use the fine obstacle map from PacManAIDebugBT
+                var fineMap = PacManAIDebugBT.FineObstacleMap;
+                if (fineMap != null)
+                {
+                    fineMap.DrawMapGizmos();
+                }
+                // Fallback to the singleton instance if fine map is not available
+                else if (ObstacleMapV2.Instance != null)
+                {
+                    ObstacleMapV2.Instance.DrawMapGizmos();
+                }
             }
         }
     }
