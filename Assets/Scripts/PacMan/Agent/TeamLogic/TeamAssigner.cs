@@ -95,6 +95,9 @@ public class TeamAssigner : MonoBehaviour
             if (newLeaderAI != null && oldLeaderAI != null)
             {
                 newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
+                oldLeaderAI.SetAssignedRole(StaticRole.BodyGuard);
+                oldLeaderAI.ClearAttackAnchor();
+                oldLeaderAI.ClearDefenseAnchor();
             }
             
             // Update FormationManager with the new leader

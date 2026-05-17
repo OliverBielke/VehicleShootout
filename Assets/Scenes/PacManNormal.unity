@@ -5208,8 +5208,8 @@ MonoBehaviour:
   path: 0
   vO: 0
   enemyLocalization: 0
-  agentHud: 0
-  visualizeGroups: 0
+  agentHud: 1
+  visualizeGroups: 1
   timeKeeper: 0
   timingLogIntervalSeconds: 5
   timingLongSampleThresholdMs: 25

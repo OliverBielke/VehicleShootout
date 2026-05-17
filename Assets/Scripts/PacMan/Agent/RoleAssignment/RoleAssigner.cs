@@ -150,13 +150,8 @@ namespace PacMan.Agent.RoleAssignment
         {
             if (team == null || team.Count == 0)
                 return;
-            
-            var sortedByMiddleDistance = team
-                .OrderBy(ai => Mathf.Abs(ai.transform.localPosition.x - _middleInfo.MidXLocal))
-                .ThenBy(ai => ai.transform.localPosition.z)
-                .ToList();
 
-            bool isBlue = team[0].CompareTag("Blue");
+            var isBlue = team[0].CompareTag("Blue");
             var memberLeaderDict =
                 isBlue ? TeamAssigner.Instance.MembersByLeaderBlue : TeamAssigner.Instance.MembersByLeaderRed;
             var teamLeaders = memberLeaderDict.Keys.ToList();
@@ -164,7 +159,7 @@ namespace PacMan.Agent.RoleAssignment
             if (teamLeaders.Count == 0)
                 Debug.LogWarning("RoleAssigner: teamLeaders count is zero");
             
-            int attackerCount = GetAttackerCount(teamLeaders.Count);
+            var attackerCount = GetAttackerCount(teamLeaders.Count);
             var attackers = teamLeaders.OrderBy(l => memberLeaderDict[l].Count).Take(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
             var defenders = teamLeaders.OrderBy(l => memberLeaderDict[l].Count).Skip(attackerCount).Select(a => a.GetComponent<PacManAIDebugBT>()).ToList();
             
@@ -219,11 +214,16 @@ namespace PacMan.Agent.RoleAssignment
                 .ToList();
         }
 
-        private int GetAttackerCount(int teamSize)
+        /// <summary>
+        /// Returns the number of attackers to assign based on the team size.
+        /// For 3 or more members, assigns 2 attackers; otherwise, assigns 1 attacker.
+        /// This is a simple heuristic that can be adjusted as needed.
+        /// </summary>
+        /// <param name="teamSize">Number of teams. </param>
+        /// <returns>Number of attackers.</returns>
+        private static int GetAttackerCount(int teamSize)
         {
-            if (teamSize >= 4) return 2;
-            if (teamSize == 3) return 1;
-            return 1;
+            return teamSize >= 3 ? 2 : 1;
         }
 
         private void AssignDefenseAnchors(List<PacManAIDebugBT> defenders)
