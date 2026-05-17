@@ -33,6 +33,10 @@ namespace PacMan.Agent
             public bool IsVisible;
             public bool HasFood;
             public bool HasPosition;
+            /// <summary>True when the enemy was observed directly and its health was available from the networked agent.</summary>
+            public bool HasHealth;
+            /// <summary>Normalized enemy health in the range [0..1]; defaults to 1 when the value is unknown.</summary>
+            public float HealthNormalized;
         }
 
         /// <summary>
@@ -98,6 +102,15 @@ namespace PacMan.Agent
         [SerializeField] private float defenderMirrorEnemySideDepth = 2.0f;
         [SerializeField] private float defenderMirrorLanePadding = 0.5f;
         [SerializeField] private int defenderMirrorRepathIntervalSteps = 1;
+        // Border band used to look for safe squares on our side of the midline.
+        [Header("Defense Border Advantage")]
+        [SerializeField] private float defenderBorderAdvantageDepth = 2.0f;
+        /// <summary>Scales the border-advantage X-band wider than the base depth so the defender checks a broader slice near the midline.</summary>
+        [SerializeField] private float defenderBorderAdvantageXWidthMultiplier = 1.5f;
+        // Minimum friendly-vs-enemy health margin required before we commit to the border square.
+        [SerializeField] private float defenderBorderAdvantageMinHealthMargin = 0.15f;
+        /// <summary>Only nearby defenders/bodyguards within this radius contribute to the friendly health pool for border advantage.</summary>
+        [SerializeField] private float defenderBorderAdvantageSupportRadius = 4f;
         [Header("Defense Middle Pills")]
         [SerializeField] private float defenderSafeMiddleDepth = 2.0f;
         [SerializeField] private float defenderSafeMiddleLanePadding = 0.4f;
@@ -173,6 +186,20 @@ namespace PacMan.Agent
         private bool _teammateYieldWaitingForSeparation = false;
         private static GUIStyle _agentHudStyle;
         private Vector3 _lastTargetPosition = Vector3.zero;
+        /// <summary>Sampled border-advantage squares considered during the most recent search pass.</summary>
+        private List<Vector3> _borderAdvantageDebugSamples = new List<Vector3>();
+        /// <summary>Minimum local-space corner of the sampled border band.</summary>
+        private Vector3 _borderAdvantageDebugBandMin = Vector3.zero;
+        /// <summary>Maximum local-space corner of the sampled border band.</summary>
+        private Vector3 _borderAdvantageDebugBandMax = Vector3.zero;
+        /// <summary>True when the cached border band contains valid coordinates for gizmo rendering.</summary>
+        private bool _borderAdvantageDebugHasBand = false;
+        /// <summary>True when the most recent search selected a border-advantage target.</summary>
+        private bool _borderAdvantageDebugHasSelection = false;
+        /// <summary>Final selected border-advantage target from the most recent search.</summary>
+        private Vector3 _borderAdvantageDebugSelectedPoint = Vector3.zero;
+        /// <summary>Human-readable reason for the selected border-advantage target.</summary>
+        private string _borderAdvantageDebugReason = string.Empty;
         
         // Fine grid is 0.2 and Voronoi grid is 1.0, so each coarse cell spans 5x5 fine cells.
         private const int VoronoiCellScaleFactor = 5; // fine 0.2 grid to coarse 1.0 grid
@@ -192,18 +219,24 @@ namespace PacMan.Agent
         {
             _staticAssignedRole = role;
             _assignedRole = role;
+            if (role != StaticRole.Defend)
+                ResetBorderAdvantageDebugState();
             Debug.Log($"{name} assigned role: {_assignedRole}");
         }
 
         public void SetTemporaryRole(StaticRole role)
         {
             _assignedRole = role;
+            if (role != StaticRole.Defend)
+                ResetBorderAdvantageDebugState();
             Debug.Log($"{name} assigned temporary role: {_assignedRole}");
         }
         
         public void RevertTemporaryRole(StaticRole role)
         {
             _assignedRole = _staticAssignedRole;
+            if (_assignedRole != StaticRole.Defend)
+                ResetBorderAdvantageDebugState();
             Debug.Log($"{name} reverted to non-temporary role: {_assignedRole}");
         }
 
@@ -347,11 +380,11 @@ namespace PacMan.Agent
                     float health = _agent.GetHealth()/100f;
                     if (_assignedRole == StaticRole.Defend)
                     {
-                        roleLosMultiplier = Mathf.Lerp(-1f, 2f, 1-health); // Defenders are in large groups and should encourage fights
+                        roleLosMultiplier = Mathf.Lerp(0f, 0f, 1-health); // Defenders are in large groups and should encourage fights
                     }
                     else if (_assignedRole == StaticRole.Attack)
                     {
-                        roleLosMultiplier = Mathf.Lerp(.5f, 5f, 1-health); // Attackers should not really fight
+                        roleLosMultiplier = Mathf.Lerp(.5f, 2.5f, 1-health); // Attackers should not really fight
                     }
                     
                     _losAgentData.losMultiplier = roleLosMultiplier;
@@ -967,26 +1000,11 @@ namespace PacMan.Agent
                     bb.debugReason = $"Guarding lane pill pile ({protectedLaneFoodCount} pills)";
             }
 
-            bb.enemyLikelyCrossingMyLane = false;
-            bb.predictedCrossingPoint = Vector3.zero;
-            if (!bb.shouldLootWhilePowered &&
-                !bb.shouldReturnHome &&
-                !isPowered &&
-                !isScared &&
-                !bb.enemyPacmanIntruderSuspected &&
-                TryGetMirrorLaneTarget(out var mirrorTarget, out var mirrorReason))
-            {
-                bb.enemyLikelyCrossingMyLane = true;
-                bb.predictedCrossingPoint = mirrorTarget;
-                bb.debugReason = mirrorReason;
-            }
-
             bb.safeMiddlePillsAvailable = false;
             bb.safeMiddlePillPosition = Vector3.zero;
             if (!bb.shouldLootWhilePowered &&
                 !bb.shouldReturnHome &&
                 !bb.enemyPacmanIntruderSuspected &&
-                !bb.enemyLikelyCrossingMyLane &&
                 (!isPowered || !holdLaneDueToFoodPile) &&
                 TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
             {
@@ -1171,21 +1189,19 @@ namespace PacMan.Agent
                 }
             }
 
-            // Check mirror lane target
-            bb.enemyLikelyCrossingMyLane = false;
-            bb.predictedCrossingPoint = Vector3.zero;
-            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckMirrorLane"))
+            bb.borderAdvantageSquareAvailable = false;
+            bb.borderAdvantageSquarePosition = Vector3.zero;
+            using (DebugManager.BeginTimingScope("AI/Decision/DefenderBlackboard/CheckBorderAdvantageSquare"))
             {
-                if (!bb.shouldLootWhilePowered &&
-                    !bb.shouldReturnHome &&
-                    !isPowered &&
-                    !isScared &&
-                    !bb.enemyPacmanIntruderSuspected &&
-                    TryGetMirrorLaneTarget(out var mirrorTarget, out var mirrorReason))
+                if (!bb.shouldLootWhilePowered && !bb.shouldReturnHome)
                 {
-                    bb.enemyLikelyCrossingMyLane = true;
-                    bb.predictedCrossingPoint = mirrorTarget;
-                    bb.debugReason = mirrorReason;
+                    var trackedEnemies = GetTrackedEnemies();
+                    if (TryGetBorderAdvantageSquareTarget(trackedEnemies, out var borderAdvantageTarget, out var borderAdvantageReason))
+                    {
+                        bb.borderAdvantageSquareAvailable = true;
+                        bb.borderAdvantageSquarePosition = borderAdvantageTarget;
+                        bb.debugReason = borderAdvantageReason;
+                    }
                 }
             }
 
@@ -1197,7 +1213,6 @@ namespace PacMan.Agent
                 if (!bb.shouldLootWhilePowered &&
                     !bb.shouldReturnHome &&
                     !bb.enemyPacmanIntruderSuspected &&
-                    !bb.enemyLikelyCrossingMyLane &&
                     (!isPowered || !holdLaneDueToFoodPile) &&
                     TryGetSafeMiddlePillTarget(activeFood, out var safeMiddleTarget, out var safeMiddleReason))
                 {
@@ -1593,7 +1608,9 @@ namespace PacMan.Agent
                         IsGhost = observation.IsGhost,
                         IsVisible = observation.Visible,
                         HasFood = observation.HasFood,
-                        HasPosition = true
+                        HasPosition = true,
+                        HasHealth = false,
+                        HealthNormalized = 1f
                     };
                 }
             }
@@ -1613,7 +1630,9 @@ namespace PacMan.Agent
                         IsGhost = enemy.IsGhost(),
                         IsVisible = true,
                         HasFood = enemy.GetCarriedFoodCount() > 0,
-                        HasPosition = true
+                        HasPosition = true,
+                        HasHealth = true,
+                        HealthNormalized = enemy.GetHealthNormalized()
                     };
                 }
             }
@@ -2180,6 +2199,237 @@ namespace PacMan.Agent
         }
 
         /// <summary>
+        /// Finds a nearby square on our side of the border where visible or tracked enemies are in LOS and our defender group has a health advantage.
+        /// The candidate search is restricted to a narrow X-band near the midline so the defender only contests border squares.
+        /// </summary>
+        /// <param name="trackedEnemies">Tracked enemy agents from the particle filter and current visible-enemy list.</param>
+        /// <param name="targetPosition">Outputs the selected border square to hold when a suitable advantage square is found.</param>
+        /// <param name="reason">Outputs a short debug reason describing why the square was selected.</param>
+        /// <returns>True when a valid border-advantage square was found; otherwise false.</returns>
+        private bool TryGetBorderAdvantageSquareTarget(List<TrackedEnemyInfo> trackedEnemies, out Vector3 targetPosition, out string reason)
+        {
+            targetPosition = Vector3.zero;
+            reason = null;
+            ResetBorderAdvantageDebugState();
+
+            if (_assignedRole != StaticRole.Defend)
+                return false;
+
+            if (_agent == null ||
+                _obstacleMap == null ||
+                LosField.instance == null ||
+                trackedEnemies == null ||
+                trackedEnemies.Count == 0 ||
+                _middleInfo.Lanes == null ||
+                _middleInfo.Lanes.Count == 0)
+            {
+                return false;
+            }
+
+            Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
+            if (myTeam == Team.Undefined)
+                return false;
+
+            // Use only nearby defenders/bodyguards as the friendly strength pool.
+            float supportRadius = Mathf.Max(0f, defenderBorderAdvantageSupportRadius);
+            var supportingAgents = RoleAssigner.Instance != null
+                ? RoleAssigner.Instance.GetRegisteredAgentsForTeam(myTeam)
+                    .Where(agent =>
+                        agent != null &&
+                        agent.AgentManager != null &&
+                        (agent.AssignedRole == StaticRole.Defend || agent.AssignedRole == StaticRole.BodyGuard) &&
+                        Vector3.Distance(transform.localPosition, agent.transform.localPosition) <= supportRadius)
+                    .ToList()
+                : new List<PacManAIDebugBT>();
+
+            if (supportingAgents.Count == 0)
+                supportingAgents.Add(this);
+
+            float friendlyHealth = supportingAgents
+                .Where(agent => agent != null && agent.AgentManager != null)
+                .Sum(agent => Mathf.Clamp01(agent.AgentManager.GetHealthNormalized()));
+
+            if (friendlyHealth <= 0f)
+                return false;
+
+            float midX = _middleInfo.MidXLocal;
+            float cellStep = Mathf.Max(0.2f, _obstacleMap.trueScale.x);
+            float ownSideNudge = Mathf.Max(0.05f, cellStep);
+            float borderDepth = Mathf.Max(ownSideNudge, defenderBorderAdvantageDepth * Mathf.Max(1f, defenderBorderAdvantageXWidthMultiplier));
+
+            float minX = myTeam == Team.Blue ? midX - borderDepth : midX + ownSideNudge;
+            float maxX = myTeam == Team.Blue ? midX - ownSideNudge : midX + borderDepth;
+            if (maxX < minX)
+            {
+                float swap = minX;
+                minX = maxX;
+                maxX = swap;
+            }
+
+            // Reuse lane centers, enemy Z positions, and the current defense anchor to test a small set of border squares.
+            var candidateZs = new List<float>();
+            foreach (var lane in _middleInfo.Lanes)
+            {
+                if (lane != null)
+                    candidateZs.Add(lane.MidCenterLocal.z);
+            }
+
+            foreach (var enemy in trackedEnemies)
+            {
+                if (enemy != null && enemy.HasPosition)
+                    candidateZs.Add(enemy.Position.z);
+            }
+
+            if (_hasDefenseAnchor)
+                candidateZs.Add(_defenseAnchor.z);
+
+            candidateZs = candidateZs
+                .Select(z => Mathf.Round(z / cellStep) * cellStep)
+                .Distinct()
+                .ToList();
+
+            if (candidateZs.Count == 0)
+                return false;
+
+            float minCandidateZ = candidateZs.Min();
+            float maxCandidateZ = candidateZs.Max();
+            Vector3 debugBandMin = new Vector3(minX, 0f, minCandidateZ - cellStep * 0.5f);
+            Vector3 debugBandMax = new Vector3(maxX, 0f, maxCandidateZ + cellStep * 0.5f);
+            var debugSamples = new List<Vector3>();
+
+            int xSamples = Mathf.Max(2, Mathf.CeilToInt(borderDepth / cellStep));
+            bool foundCandidate = false;
+            float bestScore = float.MinValue;
+            Vector3 bestTarget = Vector3.zero;
+            string bestReason = null;
+
+            foreach (float z in candidateZs)
+            {
+                for (int i = 0; i <= xSamples; i++)
+                {
+                    float t = i / (float)xSamples;
+                    float x = Mathf.Lerp(minX, maxX, t);
+                    Vector3 rawCandidate = new Vector3(x, 0f, z);
+
+                    if (!IsInOwnTerritory(rawCandidate))
+                        continue;
+
+                    Vector3 candidate = SnapToNearestFreePoint(
+                        rawCandidate,
+                        point => IsInOwnTerritory(point) && point.x >= minX && point.x <= maxX,
+                        radiusStep: cellStep,
+                        maxRadiusSteps: 8);
+
+                    if (!IsInOwnTerritory(candidate) || candidate.x < minX || candidate.x > maxX)
+                        continue;
+
+                    debugSamples.Add(candidate);
+
+                    // Only count enemies that this square can actually see through LOS.
+                    float enemyPressure = 0f;
+                    int exposedEnemies = 0;
+                    int visibleEnemies = 0;
+
+                    foreach (var enemy in trackedEnemies)
+                    {
+                        if (enemy == null || !enemy.HasPosition || enemy.IsGhost)
+                            continue;
+
+                        var losData = new LosAgentData
+                        {
+                            EnemyPositions = new List<Vector3> { enemy.Position },
+                            losMultiplier = 1f
+                        };
+
+                        if (LosField.instance.GetDanger(candidate, losData) <= 0.0001f)
+                            continue;
+
+                        float enemyHealth = Mathf.Clamp01(enemy.HasHealth ? enemy.HealthNormalized : 1f);
+                        enemyPressure += enemyHealth * (enemy.IsVisible ? 1.15f : 1f);
+                        exposedEnemies++;
+                        if (enemy.IsVisible)
+                            visibleEnemies++;
+                    }
+
+                    if (exposedEnemies == 0)
+                        continue;
+
+                    float healthMargin = friendlyHealth - enemyPressure;
+                    if (healthMargin < defenderBorderAdvantageMinHealthMargin)
+                        continue;
+
+                    float borderDistance = Mathf.Abs(candidate.x - midX);
+                    float borderSpan = Mathf.Max(0.1f, borderDepth - ownSideNudge);
+                    float borderCloseness = 1f - Mathf.Clamp01((borderDistance - ownSideNudge) / borderSpan);
+                    float score = healthMargin * 10f + exposedEnemies * 1.5f + visibleEnemies * 0.75f + borderCloseness;
+
+                    if (score <= bestScore)
+                        continue;
+
+                    foundCandidate = true;
+                    bestScore = score;
+                    bestTarget = candidate;
+                    bestReason = visibleEnemies > 0
+                        ? $"Holding border square with health advantage ({friendlyHealth:F2} vs {enemyPressure:F2})"
+                        : $"Holding border square from tracked enemies with health advantage ({friendlyHealth:F2} vs {enemyPressure:F2})";
+                }
+            }
+
+            CacheBorderAdvantageDebugState(debugBandMin, debugBandMax, debugSamples, foundCandidate, bestTarget, bestReason);
+
+            if (!foundCandidate)
+                return false;
+
+            targetPosition = bestTarget;
+            reason = bestReason;
+            return true;
+        }
+
+        /// <summary>
+        /// Clears the cached border-advantage visualization state before a new evaluation pass.
+        /// </summary>
+        private void ResetBorderAdvantageDebugState()
+        {
+            _borderAdvantageDebugSamples.Clear();
+            _borderAdvantageDebugHasBand = false;
+            _borderAdvantageDebugHasSelection = false;
+            _borderAdvantageDebugBandMin = Vector3.zero;
+            _borderAdvantageDebugBandMax = Vector3.zero;
+            _borderAdvantageDebugSelectedPoint = Vector3.zero;
+            _borderAdvantageDebugReason = string.Empty;
+        }
+
+        /// <summary>
+        /// Stores the sampled border band, evaluated squares, and winning target for gizmo rendering.
+        /// </summary>
+        /// <param name="bandMin">Local-space minimum corner of the sampled search band.</param>
+        /// <param name="bandMax">Local-space maximum corner of the sampled search band.</param>
+        /// <param name="sampledPoints">All valid local-space candidate squares considered during the search.</param>
+        /// <param name="hasSelection">True when a winning square was selected.</param>
+        /// <param name="selectedPoint">Local-space position of the selected square.</param>
+        /// <param name="reason">Human-readable selection reason used in the HUD and gizmo label.</param>
+        private void CacheBorderAdvantageDebugState(
+            Vector3 bandMin,
+            Vector3 bandMax,
+            List<Vector3> sampledPoints,
+            bool hasSelection,
+            Vector3 selectedPoint,
+            string reason)
+        {
+            _borderAdvantageDebugBandMin = bandMin;
+            _borderAdvantageDebugBandMax = bandMax;
+            _borderAdvantageDebugHasBand = true;
+
+            _borderAdvantageDebugSamples.Clear();
+            if (sampledPoints != null && sampledPoints.Count > 0)
+                _borderAdvantageDebugSamples.AddRange(sampledPoints);
+
+            _borderAdvantageDebugHasSelection = hasSelection;
+            _borderAdvantageDebugSelectedPoint = selectedPoint;
+            _borderAdvantageDebugReason = reason ?? string.Empty;
+        }
+
+        /// <summary>
         /// Maps a food position to the coarse Voronoi grid and retrieves its cell data.
         /// </summary>
         /// <param name="foodPosition">Food world/local position to sample.</param>
@@ -2253,83 +2503,6 @@ namespace PacMan.Agent
             return SnapToNearestFreePoint(desired);
         }
 
-        private bool TryGetMirrorLaneTarget(out Vector3 mirrorTarget, out string reason)
-        {
-            mirrorTarget = Vector3.zero;
-            reason = null;
-
-            if (!_hasDefenseAnchor || _middleInfo.Lanes == null || _middleInfo.Lanes.Count == 0)
-                return false;
-
-            var trackedEnemies = GetTrackedEnemies();
-            if (trackedEnemies == null || trackedEnemies.Count == 0)
-                return false;
-
-            MapMiddleAnalyzer.Lane lane = MapMiddleAnalyzer.GetClosestLane(_defenseAnchor, _middleInfo, majorOnly: false);
-            if (lane == null)
-                return false;
-
-            float laneMinZ = lane.MidCenterLocal.z;
-            float laneMaxZ = lane.MidCenterLocal.z;
-            if (lane.LeftLocalPositions != null && lane.LeftLocalPositions.Count > 0)
-            {
-                laneMinZ = Mathf.Min(laneMinZ, lane.LeftLocalPositions.Min(p => p.z));
-                laneMaxZ = Mathf.Max(laneMaxZ, lane.LeftLocalPositions.Max(p => p.z));
-            }
-            if (lane.RightLocalPositions != null && lane.RightLocalPositions.Count > 0)
-            {
-                laneMinZ = Mathf.Min(laneMinZ, lane.RightLocalPositions.Min(p => p.z));
-                laneMaxZ = Mathf.Max(laneMaxZ, lane.RightLocalPositions.Max(p => p.z));
-            }
-
-            float paddedLaneMinZ = laneMinZ - Mathf.Max(0f, defenderMirrorLanePadding);
-            float paddedLaneMaxZ = laneMaxZ + Mathf.Max(0f, defenderMirrorLanePadding);
-            Team myTeam = TeamAssignmentUtil.CheckTeam(gameObject);
-            float midX = _middleInfo.MidXLocal;
-            float enemySideDepth = Mathf.Max(0.1f, defenderMirrorEnemySideDepth);
-
-            TrackedEnemyInfo bestEnemy = null;
-            float bestScore = float.MaxValue;
-
-            foreach (var enemy in trackedEnemies)
-            {
-                if (enemy == null || !enemy.HasPosition)
-                    continue;
-
-                Vector3 enemyPos = enemy.Position;
-                if (IsInOwnTerritory(enemyPos))
-                    continue;
-
-                bool insideEnemySideFront =
-                    myTeam == Team.Blue
-                        ? enemyPos.x >= midX && enemyPos.x <= (midX + enemySideDepth)
-                        : enemyPos.x <= midX && enemyPos.x >= (midX - enemySideDepth);
-
-                if (!insideEnemySideFront)
-                    continue;
-
-                if (enemyPos.z < paddedLaneMinZ || enemyPos.z > paddedLaneMaxZ)
-                    continue;
-
-                float laneScore = Mathf.Abs(enemyPos.z - _defenseAnchor.z);
-                float depthScore = Mathf.Abs(enemyPos.x - midX);
-                float score = laneScore + depthScore * 0.25f;
-
-                if (score >= bestScore)
-                    continue;
-
-                bestScore = score;
-                bestEnemy = enemy;
-            }
-
-            if (bestEnemy == null)
-                return false;
-
-            Vector3 desiredMirror = new Vector3(_defenseAnchor.x, 0f, bestEnemy.Position.z);
-            mirrorTarget = SnapToNearestFreePoint(desiredMirror);
-            reason = bestEnemy.IsVisible ? "Mirroring visible enemy in lane front" : "Mirroring tracked enemy in lane front";
-            return true;
-        }
 
         private bool ShouldHoldDefenderLaneDueToFoodPile(
             out int protectedFoodCount,
@@ -2832,6 +3005,9 @@ namespace PacMan.Agent
                 case "BlockCrossing":
                     return ExecuteBlockCrossing(decision);
 
+                case "MoveToBorderAdvantageSquare":
+                    return ExecuteMoveToBorderAdvantageSquare(decision);
+
                 case "CollectSafeMiddlePills":
                     return ExecuteDefenderCollectSafeMiddlePills(decision);
 
@@ -3297,6 +3473,26 @@ namespace PacMan.Agent
                 ownTerritoryOnly: true,
                 periodicRepathIntervalSteps: Mathf.Max(1, defenderMirrorRepathIntervalSteps));
         }
+
+        /// <summary>
+        /// Moves the defender toward the border-advantage square chosen by the blackboard.
+        /// </summary>
+        /// <param name="decision">Behavior-tree decision carrying the selected border target.</param>
+        /// <returns>Acceleration from the path follower, or zero when no valid target exists.</returns>
+        private Vector2 ExecuteMoveToBorderAdvantageSquare(BTDecision decision)
+        {
+            if (decision == null || !decision.HasTarget)
+            {
+                ClearCurrentPath();
+                return Vector2.zero;
+            }
+
+            return MoveToTarget(
+                decision.TargetPosition,
+                arriveDistance: 0.35f,
+                ownTerritoryOnly: true,
+                periodicRepathIntervalSteps: Mathf.Max(1, defenderMirrorRepathIntervalSteps));
+        }
         private Vector2 ExecuteDefenderCollectSafeMiddlePills(BTDecision decision)
         {
             if (decision == null || !decision.HasTarget)
@@ -3476,6 +3672,11 @@ namespace PacMan.Agent
                 DrawMiddleGizmos();
                 DrawDefenderLaneFoodPileRadiusGizmo();
             }
+
+            if (DebugManager.Instance != null && DebugManager.Instance.borderAdvantage)
+            {
+                DrawBorderAdvantageDebugGizmos();
+            }
             
             if (_voronoiPartitioning != null && _currentVoronoi != null)
             {
@@ -3555,6 +3756,93 @@ namespace PacMan.Agent
                 $"Lane food seed: {radius:0.##}\nChain: {Mathf.Max(0.1f, defenderLaneFoodPileChainRadius):0.##}"
             );
         #endif
+        }
+
+        /// <summary>
+        /// Converts a local-space debug point into world space for gizmo rendering.
+        /// </summary>
+        /// <param name="localPoint">Local-space point to convert.</param>
+        /// <returns>World-space point used by border-advantage gizmos.</returns>
+        private Vector3 ToWorldDebugPoint(Vector3 localPoint)
+        {
+            return transform.parent != null ? transform.parent.TransformPoint(localPoint) : localPoint;
+        }
+
+        /// <summary>
+        /// Draws the most recent border-advantage search band, all sampled candidate squares, and the selected target.
+        /// </summary>
+        private void DrawBorderAdvantageDebugGizmos()
+        {
+            if (_assignedRole != StaticRole.Defend)
+                return;
+
+            if (!_borderAdvantageDebugHasBand && !_borderAdvantageDebugHasSelection &&
+                (_borderAdvantageDebugSamples == null || _borderAdvantageDebugSamples.Count == 0))
+            {
+                return;
+            }
+
+            float gizmoHeight = 0.12f;
+            Vector3 bandMin = ToWorldDebugPoint(new Vector3(_borderAdvantageDebugBandMin.x, gizmoHeight, _borderAdvantageDebugBandMin.z));
+            Vector3 bandMax = ToWorldDebugPoint(new Vector3(_borderAdvantageDebugBandMax.x, gizmoHeight, _borderAdvantageDebugBandMax.z));
+            Vector3 bandCornerA = ToWorldDebugPoint(new Vector3(_borderAdvantageDebugBandMax.x, gizmoHeight, _borderAdvantageDebugBandMin.z));
+            Vector3 bandCornerB = ToWorldDebugPoint(new Vector3(_borderAdvantageDebugBandMin.x, gizmoHeight, _borderAdvantageDebugBandMax.z));
+
+            Gizmos.color = new Color(0.15f, 0.95f, 1f, 0.85f);
+            Gizmos.DrawLine(bandMin, bandCornerA);
+            Gizmos.DrawLine(bandCornerA, bandMax);
+            Gizmos.DrawLine(bandMax, bandCornerB);
+            Gizmos.DrawLine(bandCornerB, bandMin);
+
+            Gizmos.color = new Color(1f, 0.85f, 0.2f, 0.85f);
+            foreach (var sample in _borderAdvantageDebugSamples)
+            {
+                Gizmos.DrawSphere(ToWorldDebugPoint(sample + Vector3.up * 0.08f), 0.06f);
+            }
+
+            // Visualize the support radius used to decide which defenders/bodyguards contribute to the health pool.
+            float supportRadius = Mathf.Max(0f, defenderBorderAdvantageSupportRadius);
+            if (supportRadius > 0f)
+            {
+                Vector3 supportCenter = transform.position;
+                supportCenter.y += 0.14f;
+                Gizmos.color = new Color(1f, 0.55f, 0.1f, 0.85f);
+                DrawWireCircleXZ(supportCenter, supportRadius, 64);
+                Gizmos.DrawSphere(supportCenter, 0.08f);
+
+            #if UNITY_EDITOR
+                UnityEditor.Handles.color = new Color(1f, 0.55f, 0.1f, 0.95f);
+                UnityEditor.Handles.Label(
+                    supportCenter + Vector3.up * 0.25f,
+                    $"Defender support radius: {supportRadius:0.##}");
+            #endif
+            }
+
+            if (_borderAdvantageDebugHasSelection)
+            {
+                Vector3 selectedWorld = ToWorldDebugPoint(_borderAdvantageDebugSelectedPoint + Vector3.up * 0.12f);
+                Gizmos.color = Color.green;
+                Gizmos.DrawSphere(selectedWorld, 0.14f);
+                Gizmos.DrawLine(selectedWorld, selectedWorld + Vector3.up * 0.55f);
+
+            #if UNITY_EDITOR
+                UnityEditor.Handles.color = Color.green;
+                UnityEditor.Handles.Label(
+                    selectedWorld + Vector3.up * 0.25f,
+                    string.IsNullOrEmpty(_borderAdvantageDebugReason)
+                        ? $"Border advantage target ({_borderAdvantageDebugSamples.Count} samples)"
+                        : $"{_borderAdvantageDebugReason}\nSamples: {_borderAdvantageDebugSamples.Count}");
+            #endif
+            }
+            else
+            {
+            #if UNITY_EDITOR
+                UnityEditor.Handles.color = new Color(0.15f, 0.95f, 1f, 0.95f);
+                UnityEditor.Handles.Label(
+                    ToWorldDebugPoint((_borderAdvantageDebugBandMin + _borderAdvantageDebugBandMax) * 0.5f + Vector3.up * 0.25f),
+                    $"Border search band\nYellow samples: {_borderAdvantageDebugSamples.Count}\nSupport radius: {supportRadius:0.##}");
+            #endif
+            }
         }
 
         private static void DrawWireCircleXZ(Vector3 center, float radius, int segments)

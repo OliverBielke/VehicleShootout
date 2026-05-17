@@ -8,8 +8,9 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool shouldGrabPowerCapsule;
         public bool shouldLootWhilePowered;
         public bool shouldReturnHome;
+        /// <summary>True when the defender should hold a square near the border because nearby friendly support outmatches visible/tracked enemies.</summary>
+        public bool borderAdvantageSquareAvailable;
         public bool enemyPacmanIntruderSuspected;
-        public bool enemyLikelyCrossingMyLane;
         public bool safeMiddlePillsAvailable;
         public bool outsideDefensiveZone;
         public bool hasTeamLeader;
@@ -18,8 +19,9 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public Vector3 powerCapsuleTargetPosition;
         public Vector3 homeTargetPosition;
         public Vector3 enemyPillTargetPosition;
+        /// <summary>Target square on our side of the border that offers a health advantage against nearby enemies.</summary>
+        public Vector3 borderAdvantageSquarePosition;
         public Vector3 suspectedIntruderPosition;
-        public Vector3 predictedCrossingPoint;
         public Vector3 safeMiddlePillPosition;
         public Vector3 formationPoint;
         public Vector3 dropZonePoint;
@@ -96,64 +98,27 @@ namespace PacMan.Agent.BehaviorTreeFolder
                             }
                         ),
 
+                        // Hold a nearby border square when our defenders/bodyguards have the health advantage.
                         new SequenceNode<DefenderBlackboard>(
-                            "Intercept Intruder Sequence",
+                            "Border Advantage Square Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                             {
                                 new ConditionNode<DefenderBlackboard>(
-                                    "enemyPacmanIntruderSuspected",
-                                    bb => bb.enemyPacmanIntruderSuspected
+                                    "borderAdvantageSquareAvailable",
+                                    bb => bb.borderAdvantageSquareAvailable
                                 ),
                                 new ActionNode<DefenderBlackboard>(
-                                    "InterceptIntruder",
+                                    "MoveToBorderAdvantageSquare",
                                     bb => BTDecision.Running(
                                         AgentMode.Defend,
-                                        "InterceptIntruder",
+                                        "MoveToBorderAdvantageSquare",
                                         hasTarget: true,
-                                        targetPosition: bb.suspectedIntruderPosition
-                                    )
-                                )
-                            }
-                        ),
-                        new SequenceNode<DefenderBlackboard>(
-                            "Intercept Intruder Sequence",
-                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
-                            {
-                                new ConditionNode<DefenderBlackboard>(
-                                    "enemyPacmanIntruderSuspected",
-                                    bb => bb.enemyPacmanIntruderSuspected
-                                ),
-                                new ActionNode<DefenderBlackboard>(
-                                    "InterceptIntruder",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Defend,
-                                        "InterceptIntruder",
-                                        hasTarget: true,
-                                        targetPosition: bb.suspectedIntruderPosition
+                                        targetPosition: bb.borderAdvantageSquarePosition
                                     )
                                 )
                             }
                         ),
 
-                        new SequenceNode<DefenderBlackboard>(
-                            "Block Crossing Sequence",
-                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
-                            {
-                                new ConditionNode<DefenderBlackboard>(
-                                    "enemyLikelyCrossingMyLane",
-                                    bb => bb.enemyLikelyCrossingMyLane
-                                ),
-                                new ActionNode<DefenderBlackboard>(
-                                    "BlockCrossing",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Defend,
-                                        "BlockCrossing",
-                                        hasTarget: true,
-                                        targetPosition: bb.predictedCrossingPoint
-                                    )
-                                )
-                            }
-                        ),
 
                         new SequenceNode<DefenderBlackboard>(
                             "Collect Safe Middle Pills Sequence",

@@ -9,7 +9,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public bool shouldLootWhilePowered;
         public bool shouldReturnHome;
         public bool enemyPacmanIntruderSuspected;
-        public bool enemyLikelyCrossingMyLane;
         public bool safeMiddlePillsAvailable;
         public bool outsideDefensiveZone;
         public bool hasTeamLeader;
@@ -19,7 +18,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public Vector3 homeTargetPosition;
         public Vector3 enemyPillTargetPosition;
         public Vector3 suspectedIntruderPosition;
-        public Vector3 predictedCrossingPoint;
         public Vector3 safeMiddlePillPosition;
         public Vector3 formationPoint;
         public Vector3 dropZonePoint;
@@ -116,45 +114,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
                             }
                         ),
 
-                        new SequenceNode<BodyGuardBlackboard>(
-                            "Intercept Intruder Sequence",
-                            new System.Collections.Generic.List<BTNode<BodyGuardBlackboard>>
-                            {
-                                new ConditionNode<BodyGuardBlackboard>(
-                                    "enemyPacmanIntruderSuspected",
-                                    bb => bb.enemyPacmanIntruderSuspected
-                                ),
-                                new ActionNode<BodyGuardBlackboard>(
-                                    "InterceptIntruder",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Defend,
-                                        "InterceptIntruder",
-                                        hasTarget: true,
-                                        targetPosition: bb.suspectedIntruderPosition
-                                    )
-                                )
-                            }
-                        ),
-
-                        new SequenceNode<BodyGuardBlackboard>(
-                            "Block Crossing Sequence",
-                            new System.Collections.Generic.List<BTNode<BodyGuardBlackboard>>
-                            {
-                                new ConditionNode<BodyGuardBlackboard>(
-                                    "enemyLikelyCrossingMyLane",
-                                    bb => bb.enemyLikelyCrossingMyLane
-                                ),
-                                new ActionNode<BodyGuardBlackboard>(
-                                    "BlockCrossing",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Defend,
-                                        "BlockCrossing",
-                                        hasTarget: true,
-                                        targetPosition: bb.predictedCrossingPoint
-                                    )
-                                )
-                            }
-                        ),
 
                         new SequenceNode<BodyGuardBlackboard>(
                             "Collect Safe Middle Pills Sequence",
