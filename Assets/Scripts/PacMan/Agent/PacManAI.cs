@@ -239,7 +239,7 @@ namespace PacMan.Agent
             _agent = GetComponent<PacManAgentManager>();
             TeamAssigner.Instance.RegisterAgent(_agent);
             _mapManager = mapManager;
-            var gridSize = .2f;
+            var gridSize = 1f/3f;
             _obstacleMap = ObstacleMapV2.Initialize(_mapManager, new List<GameObject>(), new Vector3(gridSize, 1f, gridSize));
             
             // Store the fine obstacle map for debug visualization
