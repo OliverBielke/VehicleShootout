@@ -115,6 +115,25 @@ namespace PacMan.Agent.BehaviorTreeFolder
                                 )
                             }
                         ),
+                        new SequenceNode<DefenderBlackboard>(
+                            "Intercept Intruder Sequence",
+                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
+                            {
+                                new ConditionNode<DefenderBlackboard>(
+                                    "enemyPacmanIntruderSuspected",
+                                    bb => bb.enemyPacmanIntruderSuspected
+                                ),
+                                new ActionNode<DefenderBlackboard>(
+                                    "InterceptIntruder",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Defend,
+                                        "InterceptIntruder",
+                                        hasTarget: true,
+                                        targetPosition: bb.suspectedIntruderPosition
+                                    )
+                                )
+                            }
+                        ),
 
                         new SequenceNode<DefenderBlackboard>(
                             "Block Crossing Sequence",
