@@ -4872,11 +4872,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8459c0b26e534e00b7427ac05c21c2d0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PacMan.Agent.Debugging.DebugManager
-  obstacleMap: 1
+  obstacleMap: 0
   middle: 0
   voronoi: 0
-  aStar: 0
-  path: 0
+  aStar: 1
+  path: 1
   vO: 0
   enemyLocalization: 0
   agentHud: 0

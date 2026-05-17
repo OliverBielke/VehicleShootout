@@ -136,6 +136,47 @@ public class TeamAssigner : MonoBehaviour
             return false;
         }
     }
+    /// <summary>
+    /// Returns the "readiness" score as a float between 0 and 1 indicating how ready a team is to take on a fight.
+    /// </summary>
+    /// <param name="leader"></param>
+    /// <returns></returns>
+    public float GetCurrentTeamReadiness(PacManAgentManager leader, float presentRadius, bool isBlue)
+    {
+        string teamSignature = isBlue ? "Blue" : "Red";
+        var teamDict = isBlue ? MembersByLeaderBlue : MembersByLeaderRed;
+        if (teamDict.TryGetValue(leader, out List<PacManAgentManager> members))
+        {
+            float maxTeamCount = members.Count;
+            float presentTeamCount = 0f;
+            float totalHP = 0f;
+            foreach (var groupMember in leader.GetFriendlyAgents())
+            {
+                
+                if (members.Contains(groupMember) && Vector3.Distance(leader.transform.position, groupMember.transform.position) < presentRadius)
+                {
+                    presentTeamCount++;
+                    totalHP += groupMember.GetHealth();
+                }
+            }
+
+            float partMembersPresent = presentTeamCount / maxTeamCount;
+            float partHpPresent = totalHP / (presentTeamCount * 100f);
+            float totalMultiplier = partMembersPresent * partHpPresent;
+
+            if (totalMultiplier > 1.01f || totalMultiplier < .3f)
+            {
+                Debug.LogWarning($"Calculated readiness multiplier for team {teamSignature} is out of bounds: {totalMultiplier}. " +
+                                         $"Present members: {presentTeamCount}/{maxTeamCount}, " +
+                                         $"Average HP%: {(presentTeamCount > 0 ? (totalHP / (presentTeamCount * 100f)) : 0f) * 100f}%");
+            }
+
+            return partMembersPresent;
+        }
+
+        Debug.LogWarning("Trying to get defender group readiness from perspective of member, only leaders should call this!");
+        return 0f;
+    }
 
 
     private void ClearAssignments(bool isBlue)

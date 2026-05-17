@@ -1037,6 +1037,25 @@ namespace PacMan.Agent
                                                     TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
                 bb.hasTeamLeader = TeamAssigner.Instance.TryGetLeader(_agent, out var leader);
                 bb.teamLeaderPosition = leader != null ? leader.transform.localPosition : Vector3.zero;
+
+                float readiness;
+                if (CompareTag("Blue"))
+                {
+                    bb.regroupPoint = new Vector3(-11f, 0f, 0f);
+                    readiness = TeamAssigner.Instance.GetCurrentTeamReadiness(_agent, 3.5f, true);
+                    bb.shouldGroupUp = readiness < .4f;
+                }
+                else
+                {
+                    bb.regroupPoint = new Vector3(11f, 0f, 0f);
+                    readiness = TeamAssigner.Instance.GetCurrentTeamReadiness(_agent, 3.5f, false);
+                    bb.shouldGroupUp = readiness < .4f;
+                }
+
+                if (bb.shouldGroupUp)
+                {
+                    bb.debugReason = $"Grouping up with readiness={readiness:F2}";
+                }
             }
 
             // Get home target and food pile info
@@ -2823,6 +2842,8 @@ namespace PacMan.Agent
             
             switch (decision.DebugLabel)
             {
+                case "GroupUp":
+                    return ExecuteGroupUp(decision);
                 case "MoveToLeader":
                     return ExecuteMoveToTeamLeader(decision);
                 // Defender
@@ -3297,6 +3318,19 @@ namespace PacMan.Agent
                 ownTerritoryOnly: true,
                 periodicRepathIntervalSteps: Mathf.Max(1, defenderMirrorRepathIntervalSteps));
         }
+        
+        private Vector2 ExecuteGroupUp(BTDecision decision)
+        {
+            if (decision == null || !decision.HasTarget)
+            {
+                ClearCurrentPath();
+                return Vector2.zero;
+            }
+            
+            Debug.Log("A leader is grouping up.");
+            return MoveToTarget(decision.TargetPosition, arriveDistance: 0.5f);
+        }
+        
         private Vector2 ExecuteDefenderCollectSafeMiddlePills(BTDecision decision)
         {
             if (decision == null || !decision.HasTarget)

@@ -5,6 +5,7 @@ namespace PacMan.Agent.BehaviorTreeFolder
     [System.Serializable]
     public class DefenderBlackboard
     {
+        public bool shouldGroupUp;
         public bool shouldGrabPowerCapsule;
         public bool shouldLootWhilePowered;
         public bool shouldReturnHome;
@@ -23,7 +24,7 @@ namespace PacMan.Agent.BehaviorTreeFolder
         public Vector3 safeMiddlePillPosition;
         public Vector3 formationPoint;
         public Vector3 dropZonePoint;
-
+        public Vector3 regroupPoint;
         public string debugReason;
     }
 
@@ -36,6 +37,26 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     "Defender Selector",
                     new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
                     {
+                        new SequenceNode<DefenderBlackboard>(
+                            "Group up with team sequence",
+                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
+                            {
+                                new ConditionNode<DefenderBlackboard>(
+                                    "ShouldRegroup",
+                                    bb => bb.shouldGroupUp
+                                ),
+                                new ActionNode<DefenderBlackboard>(
+                                    "GroupUp",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Defend,
+                                        "GroupUp",
+                                        hasTarget: true,
+                                        targetPosition: bb.regroupPoint
+                                    )
+                                )
+                            }
+                        ),
+                        
                         new SequenceNode<DefenderBlackboard>(
                             "Grab Power Capsule Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
