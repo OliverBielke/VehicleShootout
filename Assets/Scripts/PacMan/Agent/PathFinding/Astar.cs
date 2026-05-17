@@ -58,7 +58,7 @@ namespace PacMan.Agent.PathFinding
         /// <param name="goal">World-space goal position.</param>
         /// <param name="voronoiMap">Optional coarse Voronoi danger map used to bias path cost.</param>
         /// <returns>The planned path in world-space, or null if no path could be found.</returns>
-        public List<Vector3> PlanPathAStar(Vector3 start, Vector3 goal, List<Vector3> enemyPositions,
+        public List<Vector3> PlanPathAStar(Vector3 start, Vector3 goal, 
             Dictionary<Vector2Int, VoronoiCellData> voronoiMap = null)
         {
             _voronoiMap = voronoiMap;
@@ -129,7 +129,7 @@ namespace PacMan.Agent.PathFinding
             HashSet<Vector2Int> closedSet = new();
 
             // Pass the map instance so the node can check precomputed distances
-            var startNode = new AStarNode(pos: startCell, goal: goalCell, obstacleMap: _obstacleMap, enemyPositions,
+            var startNode = new AStarNode(pos: startCell, goal: goalCell, obstacleMap: _obstacleMap, 
                 voronoiMap: _voronoiMap, voronoiCellScale: _voronoiCellScale,
                 dangerPenaltyMultiplier: _dangerPenaltyMultiplier, parent: null);
             openSet.Add(startNode);
@@ -174,7 +174,7 @@ namespace PacMan.Agent.PathFinding
                     
                     if (neighborNode == null)
                     {
-                        neighborNode = new AStarNode(pos: neighborPos, goal: goalCell, obstacleMap: _obstacleMap, enemyPositions,
+                        neighborNode = new AStarNode(pos: neighborPos, goal: goalCell, obstacleMap: _obstacleMap, 
                             voronoiMap:_voronoiMap, voronoiCellScale: _voronoiCellScale,
                             dangerPenaltyMultiplier: _dangerPenaltyMultiplier, parent: currentNode);
                         openSet.Add(neighborNode);
@@ -187,9 +187,9 @@ namespace PacMan.Agent.PathFinding
                             Debug.DrawLine(currWorld, neighWorld, Color.cyan, 2f);
                         }
                     }
-                    else if (neighborNode.CostToCome(parent: currentNode, enemyPositions: enemyPositions) < neighborNode.GCost)
+                    else if (neighborNode.CostToCome(parent: currentNode) < neighborNode.GCost)
                     {
-                        neighborNode.SwitchParent(currentNode, enemyPositions);
+                        neighborNode.SwitchParent(currentNode);
                         
                         // Draw magenta lines if A* found a faster shortcut to an already explored node
                         if (DebugManager.Instance != null && DebugManager.Instance.aStar)
@@ -226,7 +226,7 @@ namespace PacMan.Agent.PathFinding
             private readonly float _dangerPenaltyMultiplier;
 
             public AStarNode(Vector2Int pos, Vector2Int goal, ObstacleMapV2 obstacleMap, 
-                List<Vector3> enemyPositions, Dictionary<Vector2Int, VoronoiCellData> voronoiMap, int voronoiCellScale,
+                Dictionary<Vector2Int, VoronoiCellData> voronoiMap, int voronoiCellScale,
                 float dangerPenaltyMultiplier, AStarNode parent=null)
             {
                 Position = pos;
@@ -236,7 +236,7 @@ namespace PacMan.Agent.PathFinding
                 _voronoiCellScale = Mathf.Max(1, voronoiCellScale);
                 _dangerPenaltyMultiplier = Mathf.Max(1f, dangerPenaltyMultiplier);
 
-                GCost = CostToCome(parent: parent, enemyPositions: enemyPositions);
+                GCost = CostToCome(parent: parent);
                 _hCost = Heuristic(goal: goal);
             }
     
@@ -253,7 +253,7 @@ namespace PacMan.Agent.PathFinding
                 return Vector3.Distance(goalWorld, currentWorld);
             }
 
-            public float CostToCome(AStarNode parent, List<Vector3> enemyPositions)
+            public float CostToCome(AStarNode parent)
             {
                 if (parent == null) return 0f;
                 
@@ -275,25 +275,18 @@ namespace PacMan.Agent.PathFinding
                         multiplier = Mathf.Lerp(1f, _dangerPenaltyMultiplier, danger);
                     }
                 }
-
-                LosField losField = LosField.instance;
-                float losMultiplier = 1f;
-                if (losField != null)
-                {
-                    losMultiplier += losField.GetDanger(currentWorld, enemyPositions);
-                }
                 
-                return parent.GCost + losMultiplier * multiplier * Vector3.Distance(parentWorld, currentWorld);
+                return parent.GCost + multiplier * Vector3.Distance(parentWorld, currentWorld);
             }
 
             /// <summary>
             /// Switches the parent of this node to a new parent and updates the gCost accordingly. This is used when we find a better path to an existing node in the open set.
             /// </summary>
             /// <param name="newParent">The new parent node. </param>
-            public void SwitchParent(AStarNode newParent, List<Vector3> enemyPositions)
+            public void SwitchParent(AStarNode newParent)
             {
                 Parent = newParent;
-                GCost = CostToCome(parent:newParent, enemyPositions: enemyPositions);
+                GCost = CostToCome(parent:newParent);
             }
     
             public float FCost => GCost + _hCost;
