@@ -4876,12 +4876,12 @@ MonoBehaviour:
   middle: 0
   voronoi: 0
   aStar: 0
-  path: 1
+  path: 0
   vO: 0
   enemyLocalization: 0
-  agentHud: 1
-  visualizeGroups: 1
-  borderAdvantage: 1
+  agentHud: 0
+  visualizeGroups: 0
+  borderAdvantage: 0
   timeKeeper: 0
   timingLogIntervalSeconds: 5
   timingLongSampleThresholdMs: 25
