@@ -92,6 +92,13 @@ public class TeamAssigner : MonoBehaviour
 
             var newLeaderAI = newLeader.GetComponent<PacManAIDebugBT>();
             var oldLeaderAI = deadLeader.GetComponent<PacManAIDebugBT>();
+            if (newLeaderAI != null && oldLeaderAI != null)
+            {
+                newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
+                oldLeaderAI.SetAssignedRole(StaticRole.BodyGuard);
+                oldLeaderAI.ClearAttackAnchor();
+                oldLeaderAI.ClearDefenseAnchor();
+            }
             
             // Update FormationManager with the new leader
             if (FormationManager.Instance != null)

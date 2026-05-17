@@ -19,7 +19,8 @@ namespace PacMan.Agent
     {
         None,
         Attack,
-        Defend
+        Defend,
+        BodyGuard
     }
 
     public class PacManAIDebugBT : PacManAI
@@ -43,6 +44,7 @@ namespace PacMan.Agent
         private GameObject _currentFoodTarget;
         private BehaviorTree<DefenderBlackboard> _defenderTree;
         private BehaviorTree<AttackerBlackboard> _attackerTree;
+        private BehaviorTree<BodyGuardBlackboard> _bodyGuardTree;
         private BTDecision _lastDecision;
         private string _btReason = "-";
         private StaticRole _staticAssignedRole = StaticRole.None;
@@ -245,6 +247,7 @@ namespace PacMan.Agent
             // All of the calls below should also work in here. Report it as a bug if you find that some part of the observations is inaccessible during init.
             _hasGoal = false;
             _defenderTree = DefenderTreeFactory.Create();
+            _bodyGuardTree = BodyGuardTreeFactory.Create();
             _attackerTree = AttackerTreeFactory.Create();
             _middleAnalyzer = new MapMiddleAnalyzer(_obstacleMap);
             _middleInfo = _middleAnalyzer.Analyze();
@@ -383,6 +386,16 @@ namespace PacMan.Agent
         {
             switch (_assignedRole)
             {
+                case StaticRole.BodyGuard:
+                {
+                    BodyGuardBlackboard bb = BuildBodyGuardBlackboard();
+                    _btReason = bb.debugReason;
+                    using (DebugManager.BeginTimingScope("AI/Decision/BodyGuardTree"))
+                    {
+                        return _bodyGuardTree.Evaluate(bb);
+                    }
+                }
+
                 case StaticRole.Defend:
                 {
                     DefenderBlackboard bb = BuildDefenderBlackboard();
@@ -825,13 +838,13 @@ namespace PacMan.Agent
             return Mathf.Abs(stableId) % interval;
         }
         
-        private DefenderBlackboard BuildBodyGuardBlackboard()
+        private BodyGuardBlackboard BuildBodyGuardBlackboard()
         {
-            DefenderBlackboard bb = new DefenderBlackboard();
+            BodyGuardBlackboard bb = new BodyGuardBlackboard();
 
             Vector3 myPos = transform.localPosition;
             UpdateVoronoiData();
-            var defendAssignment = RoleAssigner.Instance?.DefendManager?.GetAssignment(this);
+            var defendAssignment = RoleAssigner.Instance?.BodyGuardManager?.GetAssignment(this);
             var activeFood = _agent.GetFoodObjects().FindAll(f => f.activeSelf &&
                                                 TeamAssignmentUtil.CheckTeam(f) != TeamAssignmentUtil.CheckTeam(gameObject));
             bool isPowered = _agent.IsPoweredUp();
@@ -2313,7 +2326,7 @@ namespace PacMan.Agent
             protectedFoodCenter = _hasDefenseAnchor ? _defenseAnchor : transform.localPosition;
             protectedFoodPositions = new List<Vector3>();
 
-            if (_assignedRole != StaticRole.Defend ||
+            if ((_assignedRole != StaticRole.Defend && _assignedRole != StaticRole.BodyGuard) ||
                 !_hasDefenseAnchor ||
                 defenderLaneFoodPileHoldThreshold <= 0 ||
                 _middleInfo.Lanes == null ||
@@ -2333,7 +2346,7 @@ namespace PacMan.Agent
                 ? RoleAssigner.Instance.GetRegisteredAgentsForTeam(myTeam)
                     .Where(agent =>
                         agent != null &&
-                        agent.AssignedRole == StaticRole.Defend &&
+                        (agent.AssignedRole == StaticRole.Defend || agent.AssignedRole == StaticRole.BodyGuard) &&
                         agent.HasDefenseAnchor)
                     .ToList()
                 : new List<PacManAIDebugBT>();
@@ -3099,7 +3112,9 @@ namespace PacMan.Agent
 
         private bool ShouldIgnoreTeammateYieldWhileSettled()
         {
-            if (_assignedRole != StaticRole.Defend || _lastDecision == null || !_lastDecision.HasTarget)
+            if ((_assignedRole != StaticRole.Defend && _assignedRole != StaticRole.BodyGuard) ||
+                _lastDecision == null ||
+                !_lastDecision.HasTarget)
                 return false;
 
             bool isHoldingPosition =
@@ -3345,13 +3360,13 @@ namespace PacMan.Agent
             _waypoints = null;
             _droneControlling = null;
         }
-        
         private void OnDrawGizmos()
         {
             if (debugLOS)
             {
                 LosField.instance.DrawLosField(this);
             }
+            
             MapEditing.DrawObstacleMap(transform, _obstacleMap, drawObstacleMap);
             if (DebugManager.Instance != null && DebugManager.Instance.path)
             {
