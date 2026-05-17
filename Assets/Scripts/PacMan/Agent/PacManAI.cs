@@ -55,6 +55,7 @@ namespace PacMan.Agent
         [SerializeField] private bool _hasDefenseAnchor = false;
         [SerializeField] private Vector3 _attackAnchor;
         [SerializeField] private bool _hasAttackAnchor = false;
+        [SerializeField] private bool debugLOS = false;
         private MapMiddleAnalyzer _middleAnalyzer;
         private MapMiddleAnalyzer.MiddleInfo _middleInfo;
         [Header("Attack Patrol")]
@@ -703,7 +704,7 @@ namespace PacMan.Agent
                     enforceOwnTerritoryPath ? IsInOwnTerritory : null,
                     VoronoiCellScaleFactor,
                     voronoiPathDangerPenaltyMultiplier);
-                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, _currentVoronoi);
+                aStarPath = aStar.PlanPathAStar(curPos, _goalPosition, GetTrackedEnemies().Select(e => e.Position).ToList() ,_currentVoronoi);
             }
 
             _lastPlannedGoalPosition = _goalPosition;
@@ -3339,6 +3340,11 @@ namespace PacMan.Agent
         }
         private void OnDrawGizmos()
         {
+            if (debugLOS)
+            {
+                LosField.instance.DrawLosField(this);
+            }
+            
             MapEditing.DrawObstacleMap(transform, _obstacleMap, drawObstacleMap);
             if (DebugManager.Instance != null && DebugManager.Instance.path)
             {
