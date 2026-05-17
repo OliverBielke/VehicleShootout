@@ -280,8 +280,6 @@ namespace PacMan.Agent
         {
             using (DebugManager.BeginTimingScope("Total"))
             {
-
-
                 Vector3 velocity = _agent.GetVelocity();
                 int carriedFoodCount = _agent.GetCarriedFoodCount();
 
@@ -353,7 +351,6 @@ namespace PacMan.Agent
                 }
 
                 _lastDecision = EvaluateCurrentRoleTree();
-
                 _currentMode = _lastDecision.Mode;
 
                 if (_currentMode != _previousMode)
@@ -371,7 +368,7 @@ namespace PacMan.Agent
                                 teamManager.MembersByLeaderRed.ContainsKey(_agent);
                 Vector3 nextSpeed = _agent.GetVelocity() + new Vector3(accel.x, 0f, accel.y) * Time.fixedDeltaTime;
 
-                if (isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2.5f)
+                if (false && isLeader && _currentMode != AgentMode.Evade && nextSpeed.magnitude > 2f)
                 {
                     accel *= 0f;
                 }
@@ -1388,8 +1385,16 @@ namespace PacMan.Agent
                     shouldCommitReturnHome ||
                     (!isPowered && ghostNearby) ||
                     shouldReturnHomeLateGame;
+
+                Vector3 homeTarget;
+                if(shouldReturnHomeNow)
+                    homeTarget = GetStableHomeTarget(shouldReturnHomeNow);
+                else
+                {
+                    homeTarget = new Vector3(0f, 0f, transform.position.z);
+                    homeTarget = SnapToNearestFreePoint(homeTarget);
+                }
                     
-                Vector3 homeTarget = GetStableHomeTarget(shouldReturnHomeNow);
                 bool reachedHomeReturnTarget =
                     carriedFoodCount == 0 &&
                     IsInOwnTerritory(myPos) &&
@@ -2138,7 +2143,7 @@ namespace PacMan.Agent
 
             if (TryGetPointCellData(foodPosition, out var cellData))
             {
-                Debug.Log($"Los danger of food-position: {LosField.instance.GetDanger(foodPosition, _losAgentData)}");
+                //Debug.Log($"Los danger of food-position: {LosField.instance.GetDanger(foodPosition, _losAgentData)}");
                 return Mathf.Clamp01(cellData.Danger + LosField.instance.GetDanger(foodPosition, _losAgentData)/3f);
             }
                 
@@ -2149,7 +2154,7 @@ namespace PacMan.Agent
         private bool IsPointCellSafe(Vector3 pointPosition)
         {
             if (TryGetPointCellData(pointPosition, out var cellData))
-                return cellData.Danger + LosField.instance.GetDanger(pointPosition, _losAgentData) <= _voronoiSafetyThreshold;
+                return (cellData.Danger + LosField.instance.GetDanger(pointPosition, _losAgentData)/3f) <= _voronoiSafetyThreshold;
 
             if (_currentVoronoi != null && _currentVoronoi.Count > 0)
                 return false;
@@ -2160,7 +2165,7 @@ namespace PacMan.Agent
         private float GetPointDanger(Vector3 pointPosition)
         {
             if (TryGetPointCellData(pointPosition, out var cellData))
-                return Mathf.Clamp01(cellData.Danger);
+                return Mathf.Clamp01(cellData.Danger + LosField.instance.GetDanger(pointPosition, _losAgentData)/3f);
 
             return 0f;
         }
@@ -2713,6 +2718,54 @@ namespace PacMan.Agent
             return true;
         }
 
+        /// <summary>
+        /// Creates a constraint function that prevents a point from being too close to any teammate.
+        /// </summary>
+        /// <param name="minDistanceToTeammate">Minimum distance from teammates (default 0.5f)</param>
+        /// <returns>A constraint function that returns true if the position is far enough from all teammates</returns>
+        private System.Func<Vector3, bool> GetTeammateAvoidanceConstraint(float minDistanceToTeammate = 0.5f)
+        {
+            return (Vector3 candidatePos) =>
+            {
+                if (TeamAssigner.Instance == null)
+                    return true;
+
+                // Get teammates based on current agent's team
+                bool isBlue = CompareTag("Blue");
+                var leaderByMember = isBlue ? TeamAssigner.Instance.LeaderByMemberBlue : TeamAssigner.Instance.LeaderByMemberRed;
+                var membersByLeader = isBlue ? TeamAssigner.Instance.MembersByLeaderBlue : TeamAssigner.Instance.MembersByLeaderRed;
+
+                // Get the leader of this agent's group
+                if (!leaderByMember.TryGetValue(_agent, out PacManAgentManager leader))
+                    return true; // No team assigned yet, allow
+
+                // Get all teammates from the leader's group
+                if (!membersByLeader.TryGetValue(leader, out List<PacManAgentManager> teamMembers))
+                    return true; // No group found, allow
+
+                // Check distance to all teammates
+                foreach (PacManAgentManager teammate in teamMembers)
+                {
+                    if (teammate != null && teammate.transform != null)
+                    {
+                        float distToTeammate = Vector3.Distance(candidatePos, teammate.transform.localPosition);
+                        if (distToTeammate < minDistanceToTeammate)
+                            return false; // Too close to a teammate
+                    }
+                }
+
+                // Also check the leader's distance
+                if (leader != null && leader.transform != null)
+                {
+                    float distToLeader = Vector3.Distance(candidatePos, leader.transform.localPosition);
+                    if (distToLeader < minDistanceToTeammate)
+                        return false; // Too close to leader
+                }
+
+                return true; // All checks passed
+            };
+        }
+
         private Vector3 SnapToNearestFreePoint(Vector3 desired, float radiusStep = 0.2f, int maxRadiusSteps = 8)
         {
             desired.y = 0f;
@@ -3157,15 +3210,18 @@ namespace PacMan.Agent
             }
 
             Vector3 interceptTarget;
+            // Get teammate avoidance constraint for formation positioning
+            var teammateAvoidance = GetTeammateAvoidanceConstraint(minDistanceToTeammate: .75f);
+            
             if (FormationAnchor == Vector3.zero)
             {
                 Vector3 leaderPlusRadius = decision.TargetPosition - (decision.TargetPosition - transform.localPosition).normalized*teamLeadDistance;
-                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, null, radiusStep: 0.3f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(leaderPlusRadius, teammateAvoidance, radiusStep: 0.3f, maxRadiusSteps: 24);
                 Debug.Log("Trying to move to team, but no formation-anchor is assigned.");
             }
             else
             {
-                interceptTarget = SnapToNearestFreePoint(FormationAnchor, null, radiusStep: 0.3f, maxRadiusSteps: 24);
+                interceptTarget = SnapToNearestFreePoint(FormationAnchor, teammateAvoidance, radiusStep: 0.3f, maxRadiusSteps: 24);
             }
             
             if (_obstacleMap == null ||

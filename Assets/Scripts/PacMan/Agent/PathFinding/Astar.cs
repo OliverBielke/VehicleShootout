@@ -4,6 +4,7 @@ using UnityEngine;
 using Vector3 = UnityEngine.Vector3;
 using Scripts.Map;
 using PacMan.Agent.Debugging;
+using Scripts.Utils;
 
 namespace PacMan.Agent.PathFinding
 {
@@ -127,24 +128,39 @@ namespace PacMan.Agent.PathFinding
                 return null;
             }
             
-            List<AStarNode> openSet = new();
+            PriorityQueue<AStarNode, float> openSet = new();
+            Dictionary<Vector2Int, AStarNode> openByPos = new();
             HashSet<Vector2Int> closedSet = new();
 
             // Pass the map instance so the node can check precomputed distances
             var startNode = new AStarNode(pos: startCell, goal: goalCell, obstacleMap: _obstacleMap,
                 voronoiMap: _voronoiMap, voronoiCellScale: _voronoiCellScale,
                 dangerPenaltyMultiplier: _dangerPenaltyMultiplier, agentData: _agentData ,parent: null);
-            openSet.Add(startNode);
+            openSet.Enqueue(startNode, startNode.FCost);
+            openByPos[startNode.Position] = startNode;
             
-            const int maxIterations = 50000;
+            const int maxIterations = 150000;
             var iter = 0;
 
             while (openSet.Count > 0 && iter < maxIterations)
             {
                 iter++;
-                
-                var currentNode = openSet.OrderBy(n => n.FCost).First();
-                openSet.Remove(currentNode);
+
+                AStarNode currentNode = null;
+                while (openSet.Count > 0)
+                {
+                    var candidate = openSet.Dequeue();
+                    if (openByPos.TryGetValue(candidate.Position, out var live) && ReferenceEquals(live, candidate))
+                    {
+                        openByPos.Remove(candidate.Position);
+                        currentNode = candidate;
+                        break;
+                    }
+                }
+
+                if (currentNode == null)
+                    break;
+
                 closedSet.Add(currentNode.Position);
                 
                 _astarExploredNodes.Add(_obstacleMap.CellToWorld(new Vector3Int(currentNode.Position.x, 0, currentNode.Position.y)));
@@ -172,34 +188,36 @@ namespace PacMan.Agent.PathFinding
                     if (closedSet.Contains(neighborPos)) continue;
                     if (!IsTraversableAStar(neighborPos)) continue;
                     
-                    AStarNode neighborNode = openSet.FirstOrDefault(n => n.Position == neighborPos);
-                    
-                    if (neighborNode == null)
+                    if (openByPos.TryGetValue(neighborPos, out var neighborNode))
                     {
-                        neighborNode = new AStarNode(pos: neighborPos, goal: goalCell, obstacleMap: _obstacleMap, 
-                            voronoiMap:_voronoiMap, voronoiCellScale: _voronoiCellScale,
-                            dangerPenaltyMultiplier: _dangerPenaltyMultiplier, agentData: _agentData, parent: currentNode);
-                        openSet.Add(neighborNode);
-                        
-                        // Draw cyan lines for newly explored paths. They will vanish after 2 seconds.
-                        if (DebugManager.Instance != null && DebugManager.Instance.aStar)
+                        if (neighborNode.CostToCome(parent: currentNode) < neighborNode.GCost)
                         {
-                            Vector3 currWorld = _obstacleMap.CellToWorld(new Vector3Int(currentNode.Position.x, 0, currentNode.Position.y));
-                            Vector3 neighWorld = _obstacleMap.CellToWorld(new Vector3Int(neighborPos.x, 0, neighborPos.y));
-                            Debug.DrawLine(currWorld, neighWorld, Color.cyan, 2f);
+                            neighborNode.SwitchParent(currentNode);
+                            openSet.Enqueue(neighborNode, neighborNode.FCost);
+
+                            // Draw magenta lines if A* found a faster shortcut to an already explored node
+                            if (DebugManager.Instance != null && DebugManager.Instance.aStar)
+                            {
+                                Vector3 currWorld = _obstacleMap.CellToWorld(new Vector3Int(currentNode.Position.x, 0, currentNode.Position.y));
+                                Vector3 neighWorld = _obstacleMap.CellToWorld(new Vector3Int(neighborPos.x, 0, neighborPos.y));
+                                Debug.DrawLine(currWorld, neighWorld, Color.magenta, 2f);
+                            }
                         }
+                        continue;
                     }
-                    else if (neighborNode.CostToCome(parent: currentNode) < neighborNode.GCost)
+
+                    neighborNode = new AStarNode(pos: neighborPos, goal: goalCell, obstacleMap: _obstacleMap,
+                        voronoiMap:_voronoiMap, voronoiCellScale: _voronoiCellScale,
+                        dangerPenaltyMultiplier: _dangerPenaltyMultiplier, agentData: _agentData, parent: currentNode);
+                    openByPos[neighborPos] = neighborNode;
+                    openSet.Enqueue(neighborNode, neighborNode.FCost);
+
+                    // Draw cyan lines for newly explored paths. They will vanish after 2 seconds.
+                    if (DebugManager.Instance != null && DebugManager.Instance.aStar)
                     {
-                        neighborNode.SwitchParent(currentNode);
-                        
-                        // Draw magenta lines if A* found a faster shortcut to an already explored node
-                        if (DebugManager.Instance != null && DebugManager.Instance.aStar)
-                        {
-                            Vector3 currWorld = _obstacleMap.CellToWorld(new Vector3Int(currentNode.Position.x, 0, currentNode.Position.y));
-                            Vector3 neighWorld = _obstacleMap.CellToWorld(new Vector3Int(neighborPos.x, 0, neighborPos.y));
-                            Debug.DrawLine(currWorld, neighWorld, Color.magenta, 2f);
-                        }
+                        Vector3 currWorld = _obstacleMap.CellToWorld(new Vector3Int(currentNode.Position.x, 0, currentNode.Position.y));
+                        Vector3 neighWorld = _obstacleMap.CellToWorld(new Vector3Int(neighborPos.x, 0, neighborPos.y));
+                        Debug.DrawLine(currWorld, neighWorld, Color.cyan, 2f);
                     }
                 }
             }

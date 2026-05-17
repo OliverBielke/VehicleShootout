@@ -81,6 +81,8 @@ public class TeamAssigner : MonoBehaviour
             if (members.Count == 0)
                 return;
             PacManAgentManager newLeader = members[0];
+            if (newLeader == deadLeader)
+                return;
             teams.Remove(deadLeader);
             members.Add(deadLeader);
             teams[newLeader] = members;
@@ -95,6 +97,8 @@ public class TeamAssigner : MonoBehaviour
             if (newLeaderAI != null && oldLeaderAI != null)
             {
                 newLeaderAI.SetAssignedRole(oldLeaderAI.AssignedRole);
+                newLeaderAI.SetDefenseAnchor(oldLeaderAI.DefenseAnchor);
+                
                 oldLeaderAI.SetAssignedRole(StaticRole.BodyGuard);
                 oldLeaderAI.ClearAttackAnchor();
                 oldLeaderAI.ClearDefenseAnchor();

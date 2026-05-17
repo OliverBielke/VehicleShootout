@@ -219,7 +219,7 @@ MonoBehaviour:
   baseGhostDangerDistance: 0
   maxGhostDangerDistance: 4.5
   ghostDangerHysteresisDistance: 1
-  returnHomeLaneDangerSampleCount: 8
+  returnHomeLaneDangerSampleCount: 2
   returnHomeRepathIntervalSteps: 8
   returnHomeExitSwitchSafetyMargin: 8
   voronoiPathDangerPenaltyMultiplier: 30

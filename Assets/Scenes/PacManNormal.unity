@@ -3325,7 +3325,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 83476432}
-  - component: {fileID: 83476431}
+  - component: {fileID: 83476433}
   m_Layer: 0
   m_Name: LosMap
   m_TagString: Untagged
@@ -3333,21 +3333,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &83476431
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 83476430}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 11f768688f02c47fcb9d7255bd5f3692, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PacMan.Agent.PathFinding.LosField
-  mapManager: {fileID: 1490924509}
-  GlobalDangerMultiplier: 1
-  CellScale: 1
 --- !u!4 &83476432
 Transform:
   m_ObjectHideFlags: 0
@@ -3363,6 +3348,21 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &83476433
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 83476430}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 26268b60414c4496bb5ad6384bb74f0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PacMan.Agent.PathFinding.LosField
+  mapManager: {fileID: 1490924509}
+  GlobalDangerMultiplier: 1
+  CellScale: 0.5
 --- !u!1 &88690560
 GameObject:
   m_ObjectHideFlags: 0
@@ -4881,7 +4881,7 @@ MonoBehaviour:
   enemyLocalization: 0
   agentHud: 0
   visualizeGroups: 0
-  timeKeeper: 0
+  timeKeeper: 1
   timingLogIntervalSeconds: 5
   timingLongSampleThresholdMs: 25
 --- !u!4 &123659046
