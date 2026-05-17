@@ -159,6 +159,7 @@ MonoBehaviour:
   _hasDefenseAnchor: 0
   _attackAnchor: {x: 0, y: 0, z: 0}
   _hasAttackAnchor: 0
+  debugLOS: 0
   attackPatrolSwitchSteps: 30
   attackPatrolOffset: 1
   attackPatrolArriveDistance: 0.15
