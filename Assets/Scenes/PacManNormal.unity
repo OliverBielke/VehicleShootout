@@ -43786,6 +43786,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3403414422347947438, guid: 1d86bfcc61af61f4c8bfb03ac63a295c,
         type: 3}
+      propertyPath: teamName
+      value: 4TheWin
+      objectReference: {fileID: 0}
+    - target: {fileID: 3403414422347947438, guid: 1d86bfcc61af61f4c8bfb03ac63a295c,
+        type: 3}
       propertyPath: redAgentPrefab
       value: 
       objectReference: {fileID: 3737944645222697628, guid: 31e60779f26ef4b669908d871a4fead4,
@@ -62245,7 +62250,7 @@ MonoBehaviour:
   matchLength: 240
   finished: 0
   agentsPerTeam: 0
-  teamName: 
+  teamName: 4TheWin
   agents: []
   redAgents: []
   blueAgents: []
