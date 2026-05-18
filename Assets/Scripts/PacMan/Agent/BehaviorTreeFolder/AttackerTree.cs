@@ -37,25 +37,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
                     new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
                     {
                         new SequenceNode<AttackerBlackboard>(
-                            "Group Up With Team Sequence",
-                            new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
-                            {
-                                new ConditionNode<AttackerBlackboard>(
-                                    "Has Leader",
-                                    bb => bb.hasTeamLeader
-                                ),
-                                new ActionNode<AttackerBlackboard>(
-                                    "MoveToLeader",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Attack,
-                                        "MoveToLeader",
-                                        hasTarget: true,
-                                        targetPosition: bb.teamLeaderPosition
-                                    )
-                                )
-                            }
-                        ),
-                        new SequenceNode<AttackerBlackboard>(
                             "Late Game Return Home Sequence",
                             new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
                             {
@@ -74,46 +55,7 @@ namespace PacMan.Agent.BehaviorTreeFolder
                                 )
                             }
                         ),
-
-                        new SequenceNode<AttackerBlackboard>(
-                            "Grab Power Capsule Sequence",
-                            new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
-                            {
-                                new ConditionNode<AttackerBlackboard>(
-                                    "shouldGrabPowerCapsule",
-                                    bb => bb.shouldGrabPowerCapsule
-                                ),
-                                new ActionNode<AttackerBlackboard>(
-                                    "GrabPowerCapsule",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Attack,
-                                        "GrabPowerCapsule",
-                                        hasTarget: true,
-                                        targetPosition: bb.powerCapsuleTargetPosition
-                                    )
-                                )
-                            }
-                        ),
-
-                        new SequenceNode<AttackerBlackboard>(
-                            "Camp Next Power Capsule Sequence",
-                            new System.Collections.Generic.List<BTNode<AttackerBlackboard>>
-                            {
-                                new ConditionNode<AttackerBlackboard>(
-                                    "shouldCampNextPowerCapsule",
-                                    bb => bb.shouldCampNextPowerCapsule
-                                ),
-                                new ActionNode<AttackerBlackboard>(
-                                    "CampNextPowerCapsule",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Attack,
-                                        "CampNextPowerCapsule",
-                                        hasTarget: true,
-                                        targetPosition: bb.powerCapsuleCampPosition
-                                    )
-                                )
-                            }
-                        ),
+                        
 
                         new SequenceNode<AttackerBlackboard>(
                             "Return Home Sequence",

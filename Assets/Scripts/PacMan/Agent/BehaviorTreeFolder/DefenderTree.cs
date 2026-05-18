@@ -57,7 +57,27 @@ namespace PacMan.Agent.BehaviorTreeFolder
                                 )
                             }
                         ),
-
+                        
+                        new SequenceNode<DefenderBlackboard>(
+                            "Collect Safe Middle Pills Sequence",
+                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
+                            {
+                                new ConditionNode<DefenderBlackboard>(
+                                    "safeMiddlePillsAvailable",
+                                    bb => bb.safeMiddlePillsAvailable
+                                ),
+                                new ActionNode<DefenderBlackboard>(
+                                    "CollectSafeMiddlePills",
+                                    bb => BTDecision.Running(
+                                        AgentMode.Defend,
+                                        "CollectSafeMiddlePills",
+                                        hasTarget: true,
+                                        targetPosition: bb.safeMiddlePillPosition
+                                    )
+                                )
+                            }
+                        ),
+                        
                         new SequenceNode<DefenderBlackboard>(
                             "Return Home Sequence",
                             new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
@@ -95,27 +115,6 @@ namespace PacMan.Agent.BehaviorTreeFolder
                                         "MoveToBorderAdvantageSquare",
                                         hasTarget: true,
                                         targetPosition: bb.borderAdvantageSquarePosition
-                                    )
-                                )
-                            }
-                        ),
-
-
-                        new SequenceNode<DefenderBlackboard>(
-                            "Collect Safe Middle Pills Sequence",
-                            new System.Collections.Generic.List<BTNode<DefenderBlackboard>>
-                            {
-                                new ConditionNode<DefenderBlackboard>(
-                                    "safeMiddlePillsAvailable",
-                                    bb => bb.safeMiddlePillsAvailable
-                                ),
-                                new ActionNode<DefenderBlackboard>(
-                                    "CollectSafeMiddlePills",
-                                    bb => BTDecision.Running(
-                                        AgentMode.Defend,
-                                        "CollectSafeMiddlePills",
-                                        hasTarget: true,
-                                        targetPosition: bb.safeMiddlePillPosition
                                     )
                                 )
                             }

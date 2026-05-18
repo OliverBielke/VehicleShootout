@@ -3386,7 +3386,6 @@ namespace PacMan.Agent
                 return Vector2.zero;
             }
             
-            Debug.Log("A leader is grouping up.");
             return MoveToTarget(decision.TargetPosition, arriveDistance: 0.5f);
         }
         
