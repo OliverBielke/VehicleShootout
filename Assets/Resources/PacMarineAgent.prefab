@@ -227,6 +227,10 @@ MonoBehaviour:
   defenderMirrorEnemySideDepth: 2
   defenderMirrorLanePadding: 0.5
   defenderMirrorRepathIntervalSteps: 1
+  defenderBorderAdvantageDepth: 2
+  defenderBorderAdvantageXWidthMultiplier: 1.5
+  defenderBorderAdvantageMinHealthMargin: 0.15
+  defenderBorderAdvantageSupportRadius: 4
   defenderSafeMiddleDepth: 2
   defenderSafeMiddleLanePadding: 0.4
   defenderSafeMiddleEnemyClearance: 4

@@ -187,6 +187,10 @@ MonoBehaviour:
   defenderMirrorEnemySideDepth: 2
   defenderMirrorLanePadding: 0.5
   defenderMirrorRepathIntervalSteps: 1
+  defenderBorderAdvantageDepth: 2
+  defenderBorderAdvantageXWidthMultiplier: 1.5
+  defenderBorderAdvantageMinHealthMargin: 0.15
+  defenderBorderAdvantageSupportRadius: 4
   defenderSafeMiddleDepth: 2
   defenderSafeMiddleLanePadding: 0.4
   defenderSafeMiddleEnemyClearance: 4
@@ -212,7 +216,7 @@ MonoBehaviour:
   teammateYieldObstacleSteps: 40
   teammateYieldRetriggerCooldownSteps: 12
   teammateYieldGoalIgnoreRadius: 0.5
-  teammateYieldObstacleInflation: 1.25
+  teammateYieldObstacleInflation: 0.6
   teammateYieldSettledTargetDistance: 0.45
   teammateYieldReleaseDistance: 1.1
   teamLeadDistance: 1.5
